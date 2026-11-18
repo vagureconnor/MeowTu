@@ -11,15 +11,15 @@
   #app{position:absolute;top:0;bottom:0;left:0;right:0;}
 </style>
 <link rel="preload" href="https://cjrtnc.leaningtech.com/5.0/cj3.wasm" as="fetch" crossorigin="anonymous">
-<link rel="preload" href="/meowtu.jar" as="fetch" crossorigin="anonymous">
 <script src="https://cjrtnc.leaningtech.com/5.0/loader.js"></script>
+<script src="preload-resources.js"></script>
 </head>
 <body>
 <div id="app"></div>
 <script type="module">
-  await cheerpjInit({ version: 17 });
+  await cheerpjInit({ version: 17, preloadResources: window.MEOWTU_PRELOAD });
   cheerpjCreateDisplay(-1, -1, document.getElementById('app'));
-  await cheerpjRunJar("/app/meowtu.jar");
+  await cheerpjRunJar("/app/dl/meowtu.jar");
 </script>
 </body>
 </html>
