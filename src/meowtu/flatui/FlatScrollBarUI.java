@@ -7,6 +7,7 @@ import java.awt.geom.RoundRectangle2D;
 
 /** 细滚动条委托：宽 10px，圆角滑块，无箭头按钮。 */
 public class FlatScrollBarUI extends BasicScrollBarUI {
+    public static javax.swing.plaf.ComponentUI createUI(JComponent c) { return new FlatScrollBarUI(); }
 
     @Override protected void configureScrollBarColors() {
         thumbColor = FlatTheme.BG_PRESS;

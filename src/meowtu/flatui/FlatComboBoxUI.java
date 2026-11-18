@@ -9,6 +9,7 @@ import java.awt.geom.RoundRectangle2D;
 
 /** 下拉框委托：圆角深底 + 小箭头，弹出列表同步深色。 */
 public class FlatComboBoxUI extends BasicComboBoxUI {
+    public static javax.swing.plaf.ComponentUI createUI(JComponent c) { return new FlatComboBoxUI(); }
 
     @Override public void installUI(JComponent c) {
         super.installUI(c);

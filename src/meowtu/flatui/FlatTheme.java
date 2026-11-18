@@ -60,6 +60,7 @@ public final class FlatTheme {
         UIManager.put("ComboBoxUI", "meowtu.flatui.FlatComboBoxUI");
         UIManager.put("TextFieldUI", "meowtu.flatui.FlatTextFieldUI");
         UIManager.put("PasswordFieldUI", "meowtu.flatui.FlatTextFieldUI");
+        UIManager.put("MenuBarUI", "meowtu.flatui.FlatMenuBarUI");
         UIManager.put("ToolBarUI", "meowtu.flatui.FlatToolBarUI");
         UIManager.put("ScrollPaneUI", "meowtu.flatui.FlatScrollPaneUI");
         UIManager.put("SeparatorUI", "meowtu.flatui.FlatSeparatorUI");

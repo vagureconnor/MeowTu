@@ -21,7 +21,7 @@ public class GeometryPanel extends JPanel {
         super(new BorderLayout());
         this.frame = frame;
         setOpaque(false);
-        JPanel body = new JPanel();
+        JPanel body = new TrackPanel();
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
         body.setOpaque(false);
         body.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
@@ -106,6 +106,7 @@ public class GeometryPanel extends JPanel {
 
         JScrollPane sp = new JScrollPane(body);
         sp.setBorder(BorderFactory.createEmptyBorder());
+        sp.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         sp.getVerticalScrollBar().setUnitIncrement(16);
         add(sp, BorderLayout.CENTER);
     }

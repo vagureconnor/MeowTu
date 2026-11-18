@@ -10,6 +10,7 @@ import java.awt.geom.RoundRectangle2D;
  * 工具条切换按钮（"flat.toggle" 由 JToggleButton 自动识别）/纯图标按钮。
  */
 public class FlatButtonUI extends BasicButtonUI {
+    public static javax.swing.plaf.ComponentUI createUI(JComponent c) { return new FlatButtonUI(); }
 
     @Override public void installUI(JComponent c) {
         super.installUI(c);
@@ -62,28 +63,39 @@ public class FlatButtonUI extends BasicButtonUI {
         }
         g2.dispose();
 
-        // 图标 + 文字（居中排布）
+        // 图标 + 文字排布：支持图标在上（工具栏）与图标在左（普通按钮）
         String text = b.getText();
         Icon icon = b.getIcon();
-        if (m.isPressed()) { /* 按下不位移，保持稳定 */ }
         FontMetrics fm = c.getFontMetrics(c.getFont());
-        int gap = (icon != null && text != null && !text.isEmpty()) ? b.getIconTextGap() : 0;
-        int tw = (text == null) ? 0 : fm.stringWidth(text);
+        boolean hasText = text != null && !text.isEmpty();
+        int gap = (icon != null && hasText) ? b.getIconTextGap() : 0;
+        int tw = hasText ? fm.stringWidth(text) : 0;
         int iw = (icon == null) ? 0 : icon.getIconWidth();
-        int total = iw + (iw > 0 && tw > 0 ? gap : 0) + tw;
-        int x = (w - total) / 2;
-        int y = h / 2;
+        int ih = (icon == null) ? 0 : icon.getIconHeight();
         Color fg = !b.isEnabled() ? FlatTheme.TEXT_FAINT
                 : (primary || danger) ? Color.WHITE : FlatTheme.TEXT;
-        if (icon != null) {
-            Icon ic = !b.isEnabled() && b.getDisabledIcon() != null ? b.getDisabledIcon() : icon;
-            ic.paintIcon(c, g, x, y - ic.getIconHeight() / 2);
-            x += iw + gap;
-        }
-        if (text != null && !text.isEmpty()) {
+        Icon ic = icon;
+        if (!b.isEnabled() && b.getDisabledIcon() != null) ic = b.getDisabledIcon();
+        if (icon != null && hasText && b.getVerticalTextPosition() == SwingConstants.BOTTOM) {
+            int totalH = ih + gap + fm.getHeight();
+            int y0 = (h - totalH) / 2;
+            ic.paintIcon(c, g, (w - iw) / 2, y0);
             g.setColor(fg);
             g.setFont(c.getFont());
-            g.drawString(text, x, y + fm.getAscent() / 2 - 1);
+            g.drawString(text, (w - tw) / 2, y0 + ih + gap + fm.getAscent());
+        } else {
+            int total = iw + (iw > 0 && tw > 0 ? gap : 0) + tw;
+            int x = (w - total) / 2;
+            int y = h / 2;
+            if (icon != null) {
+                ic.paintIcon(c, g, x, y - ih / 2);
+                x += iw + gap;
+            }
+            if (hasText) {
+                g.setColor(fg);
+                g.setFont(c.getFont());
+                g.drawString(text, x, y + fm.getAscent() / 2 - 1);
+            }
         }
     }
 }

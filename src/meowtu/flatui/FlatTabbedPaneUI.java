@@ -6,6 +6,7 @@ import java.awt.*;
 
 /** 扁平标签页委托：无边框，选中页底部 2px 强调蓝线 + 文字提亮。 */
 public class FlatTabbedPaneUI extends BasicTabbedPaneUI {
+    public static javax.swing.plaf.ComponentUI createUI(JComponent c) { return new FlatTabbedPaneUI(); }
 
     @Override protected void installDefaults() {
         super.installDefaults();

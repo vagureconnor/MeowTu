@@ -6,6 +6,7 @@ import java.awt.*;
 
 /** 分隔线委托：1px 软色线。 */
 public class FlatSeparatorUI extends BasicSeparatorUI {
+    public static javax.swing.plaf.ComponentUI createUI(JComponent c) { return new FlatSeparatorUI(); }
     @Override public void paint(Graphics g, JComponent c) {
         g.setColor(FlatTheme.BORDER_SOFT);
         if (((JSeparator) c).getOrientation() == JSeparator.VERTICAL) {

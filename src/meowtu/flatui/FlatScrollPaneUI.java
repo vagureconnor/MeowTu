@@ -6,6 +6,7 @@ import java.awt.*;
 
 /** 滚动面板委托：保证底色一致。 */
 public class FlatScrollPaneUI extends BasicScrollPaneUI {
+    public static javax.swing.plaf.ComponentUI createUI(JComponent c) { return new FlatScrollPaneUI(); }
     @Override public void paint(Graphics g, JComponent c) {
         g.setColor(FlatTheme.BG);
         g.fillRect(0, 0, c.getWidth(), c.getHeight());

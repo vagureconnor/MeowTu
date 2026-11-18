@@ -6,6 +6,7 @@ import java.awt.*;
 
 /** 输入框委托：底色交给边框绘制（FlatBorders.field 带填充感），此处仅定色板。 */
 public class FlatTextFieldUI extends BasicTextFieldUI {
+    public static javax.swing.plaf.ComponentUI createUI(JComponent c) { return new FlatTextFieldUI(); }
 
     @Override protected void installDefaults() {
         super.installDefaults();

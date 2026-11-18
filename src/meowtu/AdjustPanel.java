@@ -19,7 +19,7 @@ public class AdjustPanel extends JPanel {
         super(new BorderLayout());
         this.frame = frame;
         setOpaque(false);
-        JPanel body = new JPanel();
+        JPanel body = new TrackPanel();
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
         body.setOpaque(false);
 
@@ -44,21 +44,26 @@ public class AdjustPanel extends JPanel {
         reset.addActionListener(e -> { resetRows(); frame.clearPreview(); });
         JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
         btnRow.setOpaque(false);
+        btnRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         btnRow.add(reset);
-        JLabel hint = new JLabel("拖动预览，松手应用；双击参数名重置单项");
+        body.add(btnRow);
+        JLabel hint = new JLabel("拖动预览 · 松手应用 · 双击名称重置单项");
+        hint.setAlignmentX(Component.LEFT_ALIGNMENT);
         hint.setForeground(meowtu.flatui.FlatTheme.TEXT_FAINT);
         hint.setFont(hint.getFont().deriveFont(11f));
-        btnRow.add(hint);
-        body.add(btnRow);
+        hint.setBorder(BorderFactory.createEmptyBorder(0, 4, 4, 0));
+        body.add(hint);
 
         JScrollPane sp = new JScrollPane(body);
         sp.setBorder(BorderFactory.createEmptyBorder());
+        sp.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         sp.getVerticalScrollBar().setUnitIncrement(16);
         add(sp, BorderLayout.CENTER);
     }
 
     private FlatWidgets.SliderRow row(JPanel body, String name, int min, int max, double scale) {
         FlatWidgets.SliderRow r = new FlatWidgets.SliderRow(name, min, max, 0, scale);
+        r.setAlignmentX(Component.LEFT_ALIGNMENT);
         r.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
         r.slider.addChangeListener(e -> onChange(r));
         body.add(r);

@@ -67,7 +67,10 @@ public class Curves {
         if (x >= pts.get(n - 1).x) return pts.get(n - 1).y;
         int i = 0;
         while (i < n - 2 && x > pts.get(i + 1).x) i++;
-        Point p0 = pts.get(Math.max(0, i - 1)), p1 = pts.get(i), p2 = pts.get(i + 1), p3 = pts.get(Math.min(n - 1, i + 2));
+        Point p1 = pts.get(i), p2 = pts.get(i + 1);
+        // 端点用反射虚拟点，保证两点直线时样条严格线性
+        Point p0 = i > 0 ? pts.get(i - 1) : new Point(2 * p1.x - p2.x, 2 * p1.y - p2.y);
+        Point p3 = i + 2 < n ? pts.get(i + 2) : new Point(2 * p2.x - p1.x, 2 * p2.y - p1.y);
         double t = (x - p1.x) / Math.max(1, p2.x - p1.x);
         double t2 = t * t, t3 = t2 * t;
         double y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t

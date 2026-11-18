@@ -10,6 +10,7 @@ public final class FlatWidgets {
     /** 面板分组小标题。 */
     public static JLabel section(String text) {
         JLabel l = new JLabel(text);
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
         l.setForeground(FlatTheme.TEXT_DIM);
         l.setFont(l.getFont().deriveFont(Font.BOLD, 12f));
         l.setBorder(BorderFactory.createEmptyBorder(8, 2, 4, 2));
@@ -25,6 +26,8 @@ public final class FlatWidgets {
         b.setToolTipText(tip);
         b.setBorder(BorderFactory.createEmptyBorder(6, 2, 5, 2));
         b.setPreferredSize(new Dimension(56, 52));
+        b.setMaximumSize(new Dimension(72, 56));
+        b.setMinimumSize(new Dimension(48, 48));
         b.setForeground(FlatTheme.TEXT_DIM);
         return b;
     }
@@ -38,6 +41,8 @@ public final class FlatWidgets {
         b.setToolTipText(tip);
         b.setBorder(BorderFactory.createEmptyBorder(6, 2, 5, 2));
         b.setPreferredSize(new Dimension(56, 52));
+        b.setMaximumSize(new Dimension(72, 56));
+        b.setMinimumSize(new Dimension(48, 48));
         b.setForeground(FlatTheme.TEXT_DIM);
         return b;
     }
@@ -55,6 +60,7 @@ public final class FlatWidgets {
 
         public SliderRow(String name, int min, int max, int def, double scale) {
             super(new BorderLayout(6, 0));
+            setAlignmentX(Component.LEFT_ALIGNMENT);
             this.scale = scale;
             setOpaque(false);
             setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
@@ -63,6 +69,7 @@ public final class FlatWidgets {
             lab.setPreferredSize(new Dimension(64, 20));
             slider = new JSlider(min, max, def);
             slider.setOpaque(false);
+            slider.setPreferredSize(new Dimension(90, 22));
             valueBox = new JTextField(format(def), 4);
             valueBox.setHorizontalAlignment(SwingConstants.CENTER);
             valueBox.setPreferredSize(new Dimension(46, 22));

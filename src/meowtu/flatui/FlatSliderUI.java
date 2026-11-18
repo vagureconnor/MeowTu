@@ -7,6 +7,7 @@ import java.awt.geom.RoundRectangle2D;
 
 /** 细滑杆委托：4px 圆角轨道（已填充段为强调蓝）+ 14px 圆形拇指。 */
 public class FlatSliderUI extends BasicSliderUI {
+    public static javax.swing.plaf.ComponentUI createUI(JComponent c) { return new FlatSliderUI((JSlider) c); }
 
     public FlatSliderUI(JSlider s) { super(s); }
 

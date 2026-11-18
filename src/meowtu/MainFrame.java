@@ -28,7 +28,7 @@ public class MainFrame extends JFrame {
             TAB_HISTOGRAM = 4, TAB_TEXT = 5, TAB_CUTOUT = 6;
 
     private final CanvasPanel canvas = new CanvasPanel();
-    private final JTabbedPane tabs = new JTabbedPane();
+    private final JTabbedPane tabs = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.SCROLL_TAB_LAYOUT);
     private final JLabel statusLabel = new JLabel("就绪");
     private final JLabel infoLabel = new JLabel("");
     private final JButton undoBtn = new JButton("撤销", FlatIcons.undo(16));

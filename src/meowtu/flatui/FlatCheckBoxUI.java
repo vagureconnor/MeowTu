@@ -6,6 +6,7 @@ import java.awt.*;
 
 /** 复选框委托：圆角方框图标，选中时蓝底白勾。 */
 public class FlatCheckBoxUI extends BasicCheckBoxUI {
+    public static javax.swing.plaf.ComponentUI createUI(JComponent c) { return new FlatCheckBoxUI(); }
 
     private static final Icon ICON = new CheckIcon();
 
