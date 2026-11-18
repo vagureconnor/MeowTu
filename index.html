@@ -3,29 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>喵图 MeowTu · 在线版</title>
+<title>喵图 MeowTu</title>
 <link rel="icon" href="meowtu-logo-final.png">
+<link rel="preconnect" href="https://cjrtnc.leaningtech.com">
 <style>
-  html,body{margin:0;height:100%;background:#1e1e1e;color:#ddd;font-family:"PingFang SC","Microsoft YaHei",sans-serif;}
-  header{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#2b2b2b;border-bottom:1px solid #3d3d3d;}
-  header img{width:34px;height:34px;}
-  header h1{font-size:17px;margin:0;font-weight:600;}
-  header span{color:#9db8d6;font-size:13px;}
-  #tip{padding:8px 16px;font-size:13px;color:#aaa;background:#252525;}
-  #app{position:absolute;top:96px;bottom:0;left:0;right:0;}
+  html,body{margin:0;height:100%;background:#1e1e1e;}
+  #app{position:absolute;top:0;bottom:0;left:0;right:0;}
 </style>
+<link rel="preload" href="https://cjrtnc.leaningtech.com/5.0/cj3.wasm" as="fetch" crossorigin="anonymous">
+<link rel="preload" href="/meowtu.jar" as="fetch" crossorigin="anonymous">
 <script src="https://cjrtnc.leaningtech.com/5.0/loader.js"></script>
 </head>
 <body>
-<header>
-  <img src="meowtu-logo-final.png" alt="MeowTu LOGO">
-  <h1>喵图 MeowTu</h1><span>在线版 · 与桌面版同一个 JAR</span>
-</header>
-<div id="tip">正在启动 Java 运行环境（首次加载需下载运行时，请稍候）……窗口出现后即可使用；「打开/保存」使用浏览器提供的虚拟文件系统。</div>
 <div id="app"></div>
 <script type="module">
   await cheerpjInit({ version: 17 });
-  document.getElementById('tip').textContent = '运行环境就绪，正在打开喵图……';
+  cheerpjCreateDisplay(-1, -1, document.getElementById('app'));
   await cheerpjRunJar("/app/meowtu.jar");
 </script>
 </body>
