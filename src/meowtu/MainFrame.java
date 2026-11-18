@@ -124,7 +124,10 @@ public class MainFrame extends JFrame {
         bar.setBackground(FlatTheme.BG_PANEL);
         try (InputStream in = getClass().getResourceAsStream("/meowtu-logo-final.png")) {
             if (in != null) {
-                ImageIcon icon = new ImageIcon(ImageIO.read(in).getScaledInstance(30, 30, Image.SCALE_SMOOTH));
+                java.awt.image.BufferedImage logo = ImageIO.read(in);
+                int h = 30;
+                int w = Math.max(1, (int) Math.round(h * (double) logo.getWidth() / logo.getHeight()));
+                ImageIcon icon = new ImageIcon(logo.getScaledInstance(w, h, Image.SCALE_SMOOTH));
                 bar.add(new JLabel(icon));
             }
         } catch (Exception ignored) { }
