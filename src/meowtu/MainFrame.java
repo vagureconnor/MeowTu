@@ -19,13 +19,16 @@ import java.util.Deque;
 import java.util.List;
 
 /**
- * 主窗口：顶栏（LOGO+文件/历史/对比）｜左工具栏｜中央画布｜右侧标签页面板｜底状态栏。
+ * 主窗口：左工具栏（LOGO+文件/历史/对比快捷操作）｜中央画布｜右侧标签页面板｜底状态栏。
  * 持有当前图、原图、撤销/重做栈、文字对象与各编辑会话（调节/曲线/滤镜预览）。
  */
 public class MainFrame extends JFrame {
     private static final long serialVersionUID = 1L;
-    public static final int TAB_ADJUST = 0, TAB_CURVES = 1, TAB_FILTERS = 2, TAB_GEOMETRY = 3,
-            TAB_HISTOGRAM = 4, TAB_TEXT = 5, TAB_CUTOUT = 6;
+    public static final int TAB_ADJUST = 0, TAB_FILTERS = 1, TAB_GEOMETRY = 2,
+            TAB_TEXT = 3, TAB_CUTOUT = 4;
+    private static final String[] COMPARE_NAMES = {"不对比", "左右分屏", "滑块擦除", "长按原图"};
+    private int compareIndex = 0;
+    private JButton compareBtn;
 
     private final CanvasPanel canvas = new CanvasPanel();
     private final JTabbedPane tabs = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.SCROLL_TAB_LAYOUT);
@@ -110,7 +113,6 @@ public class MainFrame extends JFrame {
     private void buildLayout() {
         JPanel root = new JPanel(new BorderLayout());
         root.setBackground(FlatTheme.BG);
-        root.add(buildTopBar(), BorderLayout.NORTH);
         root.add(buildToolBar(), BorderLayout.WEST);
         canvas.setBorder(BorderFactory.createEmptyBorder());
         root.add(canvas, BorderLayout.CENTER);
@@ -119,65 +121,19 @@ public class MainFrame extends JFrame {
         setContentPane(root);
     }
 
-    private JPanel buildTopBar() {
-        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
-        bar.setBackground(FlatTheme.BG_PANEL);
-        try (InputStream in = getClass().getResourceAsStream("/meowtu-logo-final.png")) {
-            if (in != null) {
-                java.awt.image.BufferedImage logo = ImageIO.read(in);
-                int h = 30;
-                int w = Math.max(1, (int) Math.round(h * (double) logo.getWidth() / logo.getHeight()));
-                ImageIcon icon = new ImageIcon(logo.getScaledInstance(w, h, Image.SCALE_SMOOTH));
-                bar.add(new JLabel(icon));
-            }
-        } catch (Exception ignored) { }
-        JLabel title = new JLabel("喵图 MeowTu");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 15f));
-        title.setForeground(FlatTheme.TEXT);
-        bar.add(title);
-        bar.add(sep());
-        bar.add(topBtn("打开", FlatIcons.open(16), e -> openFile()));
-        bar.add(topBtn("保存", FlatIcons.save(16), e -> saveFile()));
-        bar.add(topBtn("导出", FlatIcons.exportIcon(16), e -> exportFile()));
-        bar.add(topBtn("示例图", FlatIcons.image(16), e -> makeSampleImage()));
-        bar.add(sep());
-        undoBtn.setIcon(FlatIcons.undo(16));
-        undoBtn.addActionListener(e -> undo());
-        redoBtn.addActionListener(e -> redo());
-        bar.add(undoBtn);
-        bar.add(redoBtn);
-        bar.add(sep());
-        JLabel cmpLab = new JLabel("对比");
-        cmpLab.setForeground(FlatTheme.TEXT_DIM);
-        bar.add(cmpLab);
-        JComboBox<String> cmp = new JComboBox<>(new String[]{"不对比", "左右分屏", "滑块擦除", "长按原图"});
-        cmp.addActionListener(e -> {
-            CanvasPanel.Compare mode = switch (cmp.getSelectedIndex()) {
-                case 1 -> CanvasPanel.Compare.SPLIT;
-                case 2 -> CanvasPanel.Compare.SLIDE;
-                case 3 -> CanvasPanel.Compare.HOLD;
-                default -> CanvasPanel.Compare.OFF;
-            };
-            canvas.setCompare(mode);
-            if (mode == CanvasPanel.Compare.HOLD) setStatus("在画布上按住鼠标即可查看原图");
-        });
-        bar.add(cmp);
-        JButton fit = new JButton("适配窗口");
-        fit.addActionListener(e -> canvas.fitZoom());
-        bar.add(fit);
-        return bar;
-    }
-
-    private JButton topBtn(String text, Icon icon, java.awt.event.ActionListener l) {
-        JButton b = new JButton(text, icon);
-        b.addActionListener(l);
-        return b;
-    }
-
-    private JSeparator sep() {
-        JSeparator s = new JSeparator(SwingConstants.VERTICAL);
-        s.setPreferredSize(new Dimension(5, 22));
-        return s;
+    /** 对比模式循环切换（原顶栏下拉框改为左栏按钮，点一下换一种）。 */
+    private void cycleCompare() {
+        compareIndex = (compareIndex + 1) % COMPARE_NAMES.length;
+        CanvasPanel.Compare mode = switch (compareIndex) {
+            case 1 -> CanvasPanel.Compare.SPLIT;
+            case 2 -> CanvasPanel.Compare.SLIDE;
+            case 3 -> CanvasPanel.Compare.HOLD;
+            default -> CanvasPanel.Compare.OFF;
+        };
+        canvas.setCompare(mode);
+        compareBtn.setText("对比");
+        compareBtn.setToolTipText("对比模式：" + COMPARE_NAMES[compareIndex] + "（点一下切换）");
+        if (mode == CanvasPanel.Compare.HOLD) setStatus("在画布上按住鼠标即可查看原图");
     }
 
     private JPanel buildToolBar() {
@@ -185,6 +141,51 @@ public class MainFrame extends JFrame {
         bar.setLayout(new BoxLayout(bar, BoxLayout.Y_AXIS));
         bar.setBackground(FlatTheme.BG);
         bar.setBorder(BorderFactory.createEmptyBorder(6, 4, 6, 4));
+        // LOGO 放在左栏顶部（按原图比例缩放，不单独占横栏）
+        try (InputStream in = getClass().getResourceAsStream("/meowtu-logo-final.png")) {
+            if (in != null) {
+                java.awt.image.BufferedImage logo = ImageIO.read(in);
+                int w = 44;
+                int h = Math.max(1, (int) Math.round(w * (double) logo.getHeight() / logo.getWidth()));
+                JLabel logoLab = new JLabel(new ImageIcon(logo.getScaledInstance(w, h, Image.SCALE_SMOOTH)));
+                logoLab.setAlignmentX(Component.CENTER_ALIGNMENT);
+                logoLab.setBorder(BorderFactory.createEmptyBorder(2, 0, 4, 0));
+                bar.add(logoLab);
+            }
+        } catch (Exception ignored) { }
+        JButton openBtn = FlatWidgets.commandButton("打开", FlatIcons.open(16), "打开图片");
+        openBtn.addActionListener(e -> openFile());
+        bar.add(openBtn);
+        JButton saveBtn = FlatWidgets.commandButton("保存", FlatIcons.save(16), "保存当前图片");
+        saveBtn.addActionListener(e -> saveFile());
+        bar.add(saveBtn);
+        JButton exportBtn = FlatWidgets.commandButton("导出", FlatIcons.exportIcon(16), "导出为其它格式");
+        exportBtn.addActionListener(e -> exportFile());
+        bar.add(exportBtn);
+        JButton sampleBtn = FlatWidgets.commandButton("示例图", FlatIcons.image(16), "生成一张测试图");
+        sampleBtn.addActionListener(e -> makeSampleImage());
+        bar.add(sampleBtn);
+        undoBtn.setIcon(FlatIcons.undo(16));
+        undoBtn.setVerticalTextPosition(SwingConstants.BOTTOM);
+        undoBtn.setHorizontalTextPosition(SwingConstants.CENTER);
+        undoBtn.setFont(undoBtn.getFont().deriveFont(10.5f));
+        undoBtn.addActionListener(e -> undo());
+        redoBtn.setIcon(FlatIcons.redo(16));
+        redoBtn.setVerticalTextPosition(SwingConstants.BOTTOM);
+        redoBtn.setHorizontalTextPosition(SwingConstants.CENTER);
+        redoBtn.setFont(redoBtn.getFont().deriveFont(10.5f));
+        redoBtn.addActionListener(e -> redo());
+        bar.add(undoBtn);
+        bar.add(redoBtn);
+        compareBtn = FlatWidgets.commandButton("对比", FlatIcons.image(16), "对比模式：不对比（点一下切换）");
+        compareBtn.addActionListener(e -> cycleCompare());
+        bar.add(compareBtn);
+        JButton fitBtn = FlatWidgets.commandButton("适配", FlatIcons.rect(16), "把图片缩放到窗口大小");
+        fitBtn.addActionListener(e -> canvas.fitZoom());
+        bar.add(fitBtn);
+        bar.add(Box.createVerticalStrut(6));
+        bar.add(new JSeparator(SwingConstants.HORIZONTAL));
+        bar.add(Box.createVerticalStrut(6));
         ButtonGroup group = new ButtonGroup();
         CanvasPanel.Tool[] tools = {CanvasPanel.Tool.BROWSE, CanvasPanel.Tool.CROP, CanvasPanel.Tool.TEXT,
                 CanvasPanel.Tool.CUTOUT_RECT, CanvasPanel.Tool.PERSPECTIVE};
