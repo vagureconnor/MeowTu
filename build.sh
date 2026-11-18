@@ -19,8 +19,8 @@ find src -name '*.java' > sources.txt
 "$JAVAC" -encoding UTF-8 -Xlint:all -d out @sources.txt
 rm -f sources.txt
 
-# LOGO 作为资源打进 JAR（窗口图标用）
-cp assets/meowtu-logo-final.png out/meowtu-logo-final.png
+# LOGO 作为资源打进 JAR（窗口图标/顶栏用小图版，控制 JAR 体积；原图留在 assets/）
+cp assets/meowtu-logo-embed.png out/meowtu-logo-final.png
 
 printf 'Main-Class: meowtu.Main\n' > MANIFEST.tmp
 "$JAR" cfm meowtu.jar MANIFEST.tmp -C out .
