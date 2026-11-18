@@ -50,3 +50,5 @@
 - Cloudflare：Chong 将账户级 API 令牌存入保险库（custom.cloudflare，账号级 verify=active）。Meow 以 wrangler（替身令牌经出口换真值）建项目 meowtu 并部署两次，生产地址 https://meowtu.pages.dev ，真实浏览器实测主应用完整打开。
 - GitHub main 至 676d885（极简页），gh-pages 测试站同步。
 - 2026-11-18 19:00 轮（瘦身+布局+Safari+合并）：JAR 内嵌 LOGO 换 256px 小图，JAR 1.6MB→212KB；网页删整个页眉横栏，应用全屏，LOGO 只在应用顶栏内 + favicon；favicon 改方形留白版（防 Safari 标签页拉伸）；站点加 COOP/COEP 跨源隔离头（web/_headers），CheerpJ 走快速通道，Chrome 冷启动 ~60s→~30s；页面加 cj3.wasm 与 JAR 的 preload 预加载；曲线、直方图两个标签页取消，以分区形式并入「调节」页同一滚动列（AdjustPanel.addSection），右侧剩 5 个标签：调节/滤镜/几何/文字/抠图，本地截图核验合并渲染正常。main 提交至 90f338b，Cloudflare 部署 088218ab。
+- 2026-11-18 19:19 更正轮：19:01 汇报的「顶栏已去掉」是错的——去掉的只是网页页眉，软件内 buildTopBar 顶栏仍在已部署的 JAR 里（解压查 class 确认）。已真删：buildTopBar/topBtn/sep 全部删除，LOGO 移到左栏顶部（按比例缩到宽 44），打开/保存/导出/示例图/撤销/重做/对比/适配竖排进左栏，对比下拉框改循环按钮；顺手修了合并后错位的 TAB 常量（点裁剪会跳错页的 bug）；favicon 改名 meowtu-logo-v2.png 防 Safari 缓存旧图；线上响应头已实测 COOP/COEP 齐全。main 提交 4e871de，待线上复测后报数。
+- 2026-11-18 19:40 线上复测（无顶栏版）：三项全过——应用内无横向顶栏、LOGO 在左栏顶部、左栏「示例图」出图正常。另发现加载不稳定：首个标签页在 "Graphics system is initializing" 卡了约 16 分钟（含一次重载），换新标签页后 2 分钟内加载成功；与 19:01 那次卡 10 分钟同类现象，原因未定（对照站无 COOP/COEP 也能 30 秒开，头不是必需项）。已如实告知 Chong：卡住别干等，关标签重开。
