@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>喵图 MeowTu</title>
+<link rel="icon" href="meowtu-logo-v2.png">
+<link rel="preconnect" href="__RUNTIME_ORIGIN__">
+<style>
+  html,body{margin:0;height:100%;background:#1e1e1e;overflow:hidden;}
+  #app{position:absolute;top:0;bottom:0;left:0;right:0;}
+  /* ---------- 秒开骨架：纯 HTML/CSS，先于 Java 环境渲染 ---------- */
+  #shell{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;background:#1e1e1e;color:#ddd;
+    font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;transition:opacity .6s ease;}
+  #shell.done{opacity:0;pointer-events:none;}
+  .titlebar{height:34px;background:linear-gradient(180deg,#5aa9ff,#4a9eff);display:flex;align-items:center;gap:8px;padding:0 10px;flex:none;}
+  .titlebar img{width:22px;height:18px;object-fit:contain;}
+  .titlebar .t{color:#fff;font-size:13px;font-weight:600;letter-spacing:.5px;}
+  .titlebar .dots{margin-left:auto;display:flex;gap:6px;}
+  .titlebar .dots i{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.55);display:block;}
+  .body{flex:1;display:flex;min-height:0;}
+  .toolbar{width:64px;background:#2b2b2b;border-right:1px solid #1a1a1a;display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:6px;flex:none;}
+  .toolbar img{width:44px;height:36px;object-fit:contain;margin-bottom:4px;}
+  .tbtn{width:52px;padding:6px 0 5px;border-radius:8px;background:#3a3a3a;color:#bbb;font-size:10px;text-align:center;line-height:1.5;}
+  .tbtn.blue{background:#33507a;color:#cfe6ff;}
+  .stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;text-align:center;min-width:0;}
+  .stage img{width:110px;height:89px;object-fit:contain;opacity:.95;}
+  .stage .name{font-size:17px;color:#eee;font-weight:600;}
+  .bar{width:min(320px,70vw);height:6px;border-radius:3px;background:#3a3a3a;overflow:hidden;}
+  .bar i{display:block;height:100%;width:0%;border-radius:3px;background:#4a9eff;transition:width .25s ease;}
+  .stage .pct{font-size:12px;color:#9db8d6;min-height:16px;}
+  .stage .tip{font-size:12px;color:#888;line-height:1.7;max-width:340px;}
+  .stage button{display:none;margin-top:2px;padding:8px 22px;border:0;border-radius:8px;background:#4a9eff;color:#fff;font-size:13px;cursor:pointer;}
+  .panel{width:236px;background:#262626;border-left:1px solid #1a1a1a;padding:10px 12px;flex:none;}
+  .tabs{display:flex;gap:12px;font-size:12px;color:#999;border-bottom:1px solid #3a3a3a;padding-bottom:8px;margin-bottom:12px;}
+  .tabs b{color:#fff;font-weight:600;border-bottom:2px solid #4a9eff;padding-bottom:6px;}
+  .srow{margin:11px 0;}
+  .srow label{display:block;font-size:11px;color:#aaa;margin-bottom:5px;}
+  .srow .track{height:4px;border-radius:2px;background:#3f3f3f;position:relative;}
+  .srow .track::after{content:"";position:absolute;right:22px;top:-4px;width:12px;height:12px;border-radius:50%;background:#ddd;}
+  .srow .fill{position:absolute;left:0;top:0;bottom:0;width:72%;border-radius:2px;background:#4a9eff;}
+  #rotateHint{display:none;position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:11;background:rgba(0,0,0,.72);color:#eee;
+    font-size:12px;padding:7px 14px;border-radius:999px;font-family:"PingFang SC","Microsoft YaHei",sans-serif;}
+  @media (max-width:760px){ .panel{display:none;} .toolbar{width:54px;} .tbtn{width:44px;} }
+  @media (orientation:portrait) and (pointer:coarse){ #rotateHint{display:block;} }
+</style>
+<link rel="preload" href="__RUNTIME_ORIGIN__/5.0/cj3.wasm" as="fetch" crossorigin="anonymous">
+<script src="__RUNTIME_ORIGIN__/5.0/loader.js"></script>
+<script src="preload-resources.js"></script>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="shell">
+  <div class="titlebar"><img src="meowtu-logo-v2.png" alt=""><span class="t">喵图 MeowTu</span><span class="dots"><i></i><i></i><i></i></span></div>
+  <div class="body">
+    <div class="toolbar">
+      <img src="meowtu-logo-v2.png" alt="">
+      <div class="tbtn">打开</div><div class="tbtn">保存</div><div class="tbtn">导出</div>
+      <div class="tbtn">示例图</div><div class="tbtn">撤销</div><div class="tbtn">重做</div>
+      <div class="tbtn">对比</div><div class="tbtn">适配</div>
+      <div class="tbtn blue">浏览</div><div class="tbtn">裁剪</div><div class="tbtn">文字</div><div class="tbtn">抠图</div>
+    </div>
+    <div class="stage">
+      <img src="meowtu-logo-v2.png" alt="喵图">
+      <div class="name">喵图 MeowTu</div>
+      <div class="bar"><i id="fill"></i></div>
+      <div class="pct" id="pct">正在准备…</div>
+      <div class="tip" id="tip">首次打开需要下载运行环境，约十几秒；<br>之后再打开会快很多。</div>
+      <button id="retry">重新加载</button>
+    </div>
+    <div class="panel">
+      <div class="tabs"><b>调节</b><span>滤镜</span><span>几何</span><span>文字</span><span>抠图</span></div>
+      <div class="srow"><label>曝光</label><div class="track"><div class="fill"></div></div></div>
+      <div class="srow"><label>对比度</label><div class="track"><div class="fill"></div></div></div>
+      <div class="srow"><label>色温</label><div class="track"><div class="fill"></div></div></div>
+      <div class="srow"><label>饱和度</label><div class="track"><div class="fill"></div></div></div>
+      <div class="srow"><label>高光</label><div class="track"><div class="fill"></div></div></div>
+      <div class="srow"><label>阴影</label><div class="track"><div class="fill"></div></div></div>
+      <div class="srow"><label>清晰度</label><div class="track"><div class="fill"></div></div></div>
+    </div>
+  </div>
+</div>
+<div id="rotateHint">手机建议横屏使用，编辑区更大</div>
+
+<script type="module">
+  const fill = document.getElementById('fill');
+  const pct = document.getElementById('pct');
+  const tip = document.getElementById('tip');
+  const shell = document.getElementById('shell');
+  const retry = document.getElementById('retry');
+  retry.addEventListener('click', () => location.reload());
+  function setProgress(ratio, text) {
+    fill.style.width = Math.round(Math.max(0, Math.min(1, ratio)) * 100) + '%';
+    pct.textContent = text;
+  }
+  function fail(msg) {
+    pct.textContent = '加载遇到问题';
+    tip.innerHTML = msg + '<br>点下面按钮重试；如果反复失败，换 Chrome 打开试试。';
+    retry.style.display = 'inline-block';
+  }
+  // 触屏设备关掉高清缩放：省内存、省电，图形初始化也更轻（官方选项）
+  const coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+  try {
+    setProgress(0.03, '正在下载运行环境…');
+    await cheerpjInit({
+      version: 17,
+      status: 'none',
+      disableScaling: coarse,
+      preloadResources: window.MEOWTU_PRELOAD,
+      preloadProgress: (done, total) => {
+        if (total > 0) {
+          if (done >= total) setProgress(0.6, '下载完成，正在启动 Java 环境…');
+          else setProgress(0.03 + 0.57 * (done / total), '正在下载运行环境… ' + Math.round(done / total * 100) + '%');
+        }
+      }
+    });
+    setProgress(0.65, '运行环境就绪，正在打开喵图…');
+    cheerpjCreateDisplay(-1, -1, document.getElementById('app'));
+    const jarPromise = cheerpjRunJar('__JAR_PATH__');
+    jarPromise.then(() => setProgress(0.85, '正在打开喵图…')).catch(e => fail('启动失败：' + e));
+    // 等真正的窗口画出来再撤骨架：轮询显示画布的像素
+    const probe = document.createElement('canvas');
+    probe.width = 48; probe.height = 48;
+    const pctx = probe.getContext('2d', { willReadFrequently: true });
+    let up = false;
+    for (let i = 0; i < 240 && !up; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      const c = document.querySelector('#app canvas');
+      if (c && c.width > 200 && c.height > 200) {
+        try {
+          pctx.drawImage(c, 0, 0, 48, 48);
+          const d = pctx.getImageData(0, 0, 48, 48).data;
+          const colors = new Set();
+          let blue = 0;
+          for (let p = 0; p < d.length; p += 8) {
+            colors.add(d[p] + ',' + d[p + 1] + ',' + d[p + 2]);
+            if (d[p] < 130 && d[p + 1] > 110 && d[p + 1] < 210 && d[p + 2] > 200) blue++;
+          }
+          // 应用窗口的标志：顶部蓝色标题栏出现，或画面颜色明显丰富（空画布只有一种深灰）
+          if (blue >= 3 || colors.size >= 12) up = true;
+        } catch (e) { /* 画布还不可读，继续等 */ }
+      }
+      if (!up && i === 40) setProgress(0.9, '还在努力打开，网络慢时要多等一会儿…');
+    }
+    if (up) {
+      setProgress(1, '打开成功');
+      shell.classList.add('done');
+      setTimeout(() => shell.remove(), 800);
+      const hint = document.getElementById('rotateHint');
+      if (hint) setTimeout(() => hint.remove(), 6000);
+    } else {
+      fail('等待时间过长，应用没有出现。');
+    }
+  } catch (e) {
+    fail('初始化失败：' + e);
+  }
+</script>
+</body>
+</html>
