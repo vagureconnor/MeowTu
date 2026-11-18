@@ -7,8 +7,10 @@
 </head>
 <body style="background:#1e1e1e;color:#ddd;font-family:sans-serif;">
 <p>CheerpJ 试跑页：应弹出一个带按钮的 Swing 小窗口，点按钮后标签文字改变即为通过。</p>
+<div id="display" style="position:absolute;top:60px;bottom:0;left:0;right:0;"></div>
 <script type="module">
   await cheerpjInit({ version: 17 });
+  cheerpjCreateDisplay(-1, -1, document.getElementById('display'));
   await cheerpjRunJar("/app/hello.jar");
 </script>
 </body>

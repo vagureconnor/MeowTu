@@ -25,6 +25,7 @@
 <div id="app"></div>
 <script type="module">
   await cheerpjInit({ version: 17 });
+  cheerpjCreateDisplay(-1, -1, document.getElementById('app'));
   document.getElementById('tip').textContent = '运行环境就绪，正在打开喵图……';
   await cheerpjRunJar("/app/meowtu.jar");
 </script>
