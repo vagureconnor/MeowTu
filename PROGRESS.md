@@ -49,3 +49,4 @@
 - Chong 要求网页版极简：index.html 只留 LOGO，删标题/副标题/提示行，线上已核实。
 - Cloudflare：Chong 将账户级 API 令牌存入保险库（custom.cloudflare，账号级 verify=active）。Meow 以 wrangler（替身令牌经出口换真值）建项目 meowtu 并部署两次，生产地址 https://meowtu.pages.dev ，真实浏览器实测主应用完整打开。
 - GitHub main 至 676d885（极简页），gh-pages 测试站同步。
+- 2026-11-18 19:00 轮（瘦身+布局+Safari+合并）：JAR 内嵌 LOGO 换 256px 小图，JAR 1.6MB→212KB；网页删整个页眉横栏，应用全屏，LOGO 只在应用顶栏内 + favicon；favicon 改方形留白版（防 Safari 标签页拉伸）；站点加 COOP/COEP 跨源隔离头（web/_headers），CheerpJ 走快速通道，Chrome 冷启动 ~60s→~30s；页面加 cj3.wasm 与 JAR 的 preload 预加载；曲线、直方图两个标签页取消，以分区形式并入「调节」页同一滚动列（AdjustPanel.addSection），右侧剩 5 个标签：调节/滤镜/几何/文字/抠图，本地截图核验合并渲染正常。main 提交至 90f338b，Cloudflare 部署 088218ab。
