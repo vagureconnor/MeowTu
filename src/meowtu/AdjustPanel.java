@@ -10,6 +10,7 @@ import java.awt.*;
 public class AdjustPanel extends JPanel {
     private static final long serialVersionUID = 1L;
     private final MainFrame frame;
+    private JPanel body;
     private final FlatWidgets.SliderRow exposure, brightness, contrast, temperature, tint;
     private final FlatWidgets.SliderRow saturation, vibrance, highlights, shadows, whites, blacks;
     private final FlatWidgets.SliderRow clarity, sharpen;
@@ -19,7 +20,7 @@ public class AdjustPanel extends JPanel {
         super(new BorderLayout());
         this.frame = frame;
         setOpaque(false);
-        JPanel body = new TrackPanel();
+        body = new TrackPanel();
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
         body.setOpaque(false);
 
@@ -59,6 +60,15 @@ public class AdjustPanel extends JPanel {
         sp.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         sp.getVerticalScrollBar().setUnitIncrement(16);
         add(sp, BorderLayout.CENTER);
+    }
+
+    /** 把其它面板以「分区」形式并入调节页（曲线、直方图），共用同一条滚动列。 */
+    public void addSection(String title, JComponent comp) {
+        body.add(FlatWidgets.section(title));
+        comp.setAlignmentX(Component.LEFT_ALIGNMENT);
+        Dimension pref = comp.getPreferredSize();
+        comp.setMaximumSize(new Dimension(Integer.MAX_VALUE, pref.height + 48));
+        body.add(comp);
     }
 
     private FlatWidgets.SliderRow row(JPanel body, String name, int min, int max, double scale) {

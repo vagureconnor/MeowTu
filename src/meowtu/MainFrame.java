@@ -210,11 +210,11 @@ public class MainFrame extends JFrame {
         filtersPanel = new FiltersPanel(this);
         histogramPanel = new HistogramPanel();
         textPanel = new TextPanel(this);
+        adjustPanel.addSection("曲线", curvesPanel);
+        adjustPanel.addSection("直方图", histogramPanel);
         tabs.addTab("调节", adjustPanel);
-        tabs.addTab("曲线", curvesPanel);
         tabs.addTab("滤镜", filtersPanel);
         tabs.addTab("几何", new GeometryPanel(this));
-        tabs.addTab("直方图", histogramPanel);
         tabs.addTab("文字", textPanel);
         tabs.addTab("抠图", new CutoutPanel(this));
         tabs.setPreferredSize(new Dimension(304, 0));
