@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>CheerpJ 试跑3 · 显示区修正版</title>
+<script src="https://cjrtnc.leaningtech.com/5.0/loader.js"></script>
+</head>
+<body style="background:#1e1e1e;color:#ddd;font-family:sans-serif;margin:0;">
+<p style="margin:8px;">CheerpJ 试跑页3：带显示区（cheerpjCreateDisplay），应弹出 Swing 小窗口，窗口里有标签和按钮。</p>
+<div id="st" style="margin:8px;">状态：初始化中……</div>
+<div id="display" style="position:absolute;top:90px;bottom:0;left:0;right:0;"></div>
+<script type="module">
+  const st = document.getElementById('st');
+  try {
+    await cheerpjInit({ version: 17 });
+    cheerpjCreateDisplay(-1, -1, document.getElementById('display'));
+    st.textContent = '状态：运行时就绪，启动 JAR……';
+    await cheerpjRunJar("/app/MeowTu/hello.jar");
+    st.textContent = '状态：JAR 已启动（窗口应已出现）。';
+  } catch (e) {
+    st.textContent = '状态：出错 - ' + e;
+  }
+</script>
+</body>
+</html>
