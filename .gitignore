@@ -1,0 +1,5 @@
+out/
+*.class
+spike/*.class
+spike/*.log
+*.tmp-*
