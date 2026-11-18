@@ -42,3 +42,10 @@
 - 正式版实测通过：主窗口完整渲染（菜单/工具栏/左侧栏/画布/右侧调节面板 13 个滑杆/状态栏）；点「示例图」画布出图（960×640）；点「复古」滤镜画面立即变色且稳定。无报错弹窗。
 - 打开/保存走 CheerpJ 虚拟文件系统（页面已有提示），未做真人文件选择器全流程实测。
 - 剩：Cloudflare Pages 正式部署（meowtu.pages.dev）需 Chong 在 Cloudflare 控制台把 GitHub 仓库接上（或给 API 令牌），Meow 无 Cloudflare 账号权限。
+
+## 上线与收尾（2026-11-18 18:16–18:33）
+
+- Chong 指出顶栏 LOGO 纵向拉伸：原图 1195×969 被强行缩成 30×30。已改 MainFrame 按原图比例缩放（高 30、宽等比），网页页眉图同步改等比；重打 JAR（1602458 字节），冒烟 29 项仍全过，Xvfb 截图与线上像素实测均确认宽>高（页眉 39×32、应用内约 33×29）。
+- Chong 要求网页版极简：index.html 只留 LOGO，删标题/副标题/提示行，线上已核实。
+- Cloudflare：Chong 将账户级 API 令牌存入保险库（custom.cloudflare，账号级 verify=active）。Meow 以 wrangler（替身令牌经出口换真值）建项目 meowtu 并部署两次，生产地址 https://meowtu.pages.dev ，真实浏览器实测主应用完整打开。
+- GitHub main 至 676d885（极简页），gh-pages 测试站同步。
