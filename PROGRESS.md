@@ -28,8 +28,8 @@
 - 2026-11-18 首次推送：commit `b5b7583078bcdabb255a998a03f138e1c4f5a5ed`（45 个文本文件），读回验证一致。
 - 2026-11-18 最终推送：全部源码（含 flatui 修复、TrackPanel、FlatMenuBarUI、SmokeTest、本文件），提交号见仓库 main 最新记录。
 
-## 遗留问题（需人工一步）
+## 遗留问题
 
-- ⚠️ **二进制文件未能推送**：`meowtu.jar`（1.6MB）、`web/meowtu.jar`、`web/hello.jar`、`assets/meowtu-logo*.png`、`web/meowtu-logo-final.png` 均不在仓库内（仓库只有源码与网页文本文件）。原因：GitHub 连接器只接受 UTF-8 文本文件；本机 git SSH 通道连接超时。替代办法（任一即可）：①在 GitHub 网页端把本地 `web/meowtu.jar` 与 `assets/` 两张 PNG 上传到对应路径；②clone 仓库后运行 `./build.sh`，JAR 与 web 副本会自动生成（LOGO 需把定版图放回 `assets/` 并改名 `meowtu-logo.png`）。Cloudflare Pages 部署前需先补齐 `web/meowtu.jar`。
+- ✅ **二进制文件已补齐**（2026-11-18 17:31，主代理）：经 Git Data API（凭据走保险库替身注入，全程无审批卡）一次提交 `4b06169544f3` 推入 meowtu.jar、web/meowtu.jar、web/hello.jar、assets 两张 LOGO 与 web LOGO，blob SHA 与本地逐个核对一致、已读回验证。
 - ⏳ **浏览器实测待主代理**：CheerpJ 在真实浏览器打开 `web/index.html`/`web/spike.html` 是否顺利加载 JAR、文件打开/保存对话框是否可用（沙盒无头验证 ≠ 浏览器结论）。
 - 已知取舍：JAR 内含 1.46MB 的 LOGO 资源（运行时顶栏/关于页显示用）；抠图大图蒙版上限边长 720；CheerpJ 若整包加载 JAR 失败，备选把 JAR 放 R2 并用 Pages Function 支持 Range 转发。
