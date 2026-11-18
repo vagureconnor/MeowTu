@@ -33,3 +33,12 @@
 - ✅ **二进制文件已补齐**（2026-11-18 17:31，主代理）：经 Git Data API（凭据走保险库替身注入，全程无审批卡）一次提交 `4b06169544f3` 推入 meowtu.jar、web/meowtu.jar、web/hello.jar、assets 两张 LOGO 与 web LOGO，blob SHA 与本地逐个核对一致、已读回验证。
 - ⏳ **浏览器实测待主代理**：CheerpJ 在真实浏览器打开 `web/index.html`/`web/spike.html` 是否顺利加载 JAR、文件打开/保存对话框是否可用（沙盒无头验证 ≠ 浏览器结论）。
 - 已知取舍：JAR 内含 1.46MB 的 LOGO 资源（运行时顶栏/关于页显示用）；抠图大图蒙版上限边长 720；CheerpJ 若整包加载 JAR 失败，备选把 JAR 放 R2 并用 Pages Function 支持 Range 转发。
+
+## 浏览器实测（2026-11-18 晚，主代理，真实浏览器）
+
+- 测试站：GitHub Pages（gh-pages 分支）https://vagureconnor.github.io/MeowTu/
+- 踩到两个真坑并已修复：①CheerpJ 的 /app 是网站根目录，子路径部署须带子目录名（测试页已处理；正式站 Cloudflare 在根目录，无此问题）；②必须调用 cheerpjCreateDisplay 创建显示区，否则 JAR 能启动但窗口不渲染——web/index.html 与 spike.html 已补上并推送（main 提交 1b06d4e）。
+- 试跑件实测通过：Swing 窗口出现（标题「喵图 MeowTu · CheerpJ 试跑」），点按钮后标签变为「按钮可点，Swing 运行正常 ✔」。
+- 正式版实测通过：主窗口完整渲染（菜单/工具栏/左侧栏/画布/右侧调节面板 13 个滑杆/状态栏）；点「示例图」画布出图（960×640）；点「复古」滤镜画面立即变色且稳定。无报错弹窗。
+- 打开/保存走 CheerpJ 虚拟文件系统（页面已有提示），未做真人文件选择器全流程实测。
+- 剩：Cloudflare Pages 正式部署（meowtu.pages.dev）需 Chong 在 Cloudflare 控制台把 GitHub 仓库接上（或给 API 令牌），Meow 无 Cloudflare 账号权限。
