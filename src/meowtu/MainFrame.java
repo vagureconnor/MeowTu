@@ -59,11 +59,23 @@ public class MainFrame extends JFrame {
     private TextPanel textPanel;
     private final JToggleButton[] toolButtons = new JToggleButton[5];
 
+    // 响应式布局：窄/竖窗口（手机竖屏）时左栏变顶部横条、右面板移到底部
+    private JPanel rootPanel, toolbarPanel, rightWrap, statusBarPanel;
+    private boolean portrait;
+    private boolean layoutReady;
+
     public MainFrame() {
         super("喵图 MeowTu");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1320, 840);
-        setMinimumSize(new Dimension(980, 620));
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        portrait = screen.width <= 760 || screen.width < screen.height;
+        if (portrait) {
+            setSize(Math.max(320, screen.width), Math.max(480, screen.height));
+            setMinimumSize(new Dimension(300, 420));
+        } else {
+            setSize(1320, 840);
+            setMinimumSize(new Dimension(980, 620));
+        }
         setLocationRelativeTo(null);
         loadWindowIcon();
         buildMenu();
@@ -111,14 +123,50 @@ public class MainFrame extends JFrame {
     }
 
     private void buildLayout() {
-        JPanel root = new JPanel(new BorderLayout());
-        root.setBackground(FlatTheme.BG);
-        root.add(buildToolBar(), BorderLayout.WEST);
+        rootPanel = new JPanel(new BorderLayout());
+        rootPanel.setBackground(FlatTheme.BG);
         canvas.setBorder(BorderFactory.createEmptyBorder());
-        root.add(canvas, BorderLayout.CENTER);
-        root.add(buildRightPanel(), BorderLayout.EAST);
-        root.add(buildStatusBar(), BorderLayout.SOUTH);
-        setContentPane(root);
+        rightWrap = buildRightPanel();
+        statusBarPanel = buildStatusBar();
+        applyLayout();
+        setContentPane(rootPanel);
+        layoutReady = true;
+        // 窗口尺寸跨过阈值时自动切换布局（手机旋转、浏览器窗口缩放）
+        addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override public void componentResized(java.awt.event.ComponentEvent e) {
+                if (!layoutReady) return;
+                boolean want = getWidth() <= 760 || getWidth() < getHeight();
+                if (want != portrait) { portrait = want; applyLayout(); }
+            }
+        });
+    }
+
+    /** 按当前横/竖模式装配根布局：横=左栏+右面板；竖=顶部横条（可横滑）+底部面板。 */
+    private void applyLayout() {
+        toolbarPanel = buildToolBar(portrait);
+        rootPanel.removeAll();
+        if (portrait) {
+            tabs.setPreferredSize(new Dimension(0, 288));
+            rootPanel.add(toolbarPanel, BorderLayout.NORTH);
+            rootPanel.add(canvas, BorderLayout.CENTER);
+            JPanel bottom = new JPanel(new BorderLayout());
+            bottom.setBackground(FlatTheme.BG);
+            bottom.add(rightWrap, BorderLayout.CENTER);
+            bottom.add(statusBarPanel, BorderLayout.SOUTH);
+            rootPanel.add(bottom, BorderLayout.SOUTH);
+        } else {
+            tabs.setPreferredSize(new Dimension(304, 0));
+            rootPanel.add(toolbarPanel, BorderLayout.WEST);
+            rootPanel.add(canvas, BorderLayout.CENTER);
+            rootPanel.add(rightWrap, BorderLayout.EAST);
+            rootPanel.add(statusBarPanel, BorderLayout.SOUTH);
+        }
+        updateHistoryButtons();
+        setTool(canvas.getTool());
+        if (compareBtn != null)
+            compareBtn.setToolTipText("对比模式：" + COMPARE_NAMES[compareIndex] + "（点一下切换）");
+        rootPanel.revalidate();
+        rootPanel.repaint();
     }
 
     /** 对比模式循环切换（原顶栏下拉框改为左栏按钮，点一下换一种）。 */
@@ -136,11 +184,14 @@ public class MainFrame extends JFrame {
         if (mode == CanvasPanel.Compare.HOLD) setStatus("在画布上按住鼠标即可查看原图");
     }
 
-    private JPanel buildToolBar() {
+    private JPanel buildToolBar(boolean horizontal) {
         JPanel bar = new JPanel();
-        bar.setLayout(new BoxLayout(bar, BoxLayout.Y_AXIS));
+        // 竖屏：两行网格，所有按钮一屏可见、不用横滑；横屏/桌面：竖排左栏
+        bar.setLayout(horizontal ? new GridLayout(2, 0, 4, 4)
+                : new BoxLayout(bar, BoxLayout.Y_AXIS));
         bar.setBackground(FlatTheme.BG);
-        bar.setBorder(BorderFactory.createEmptyBorder(6, 4, 6, 4));
+        bar.setBorder(horizontal ? BorderFactory.createEmptyBorder(4, 4, 4, 4)
+                : BorderFactory.createEmptyBorder(6, 4, 6, 4));
         // LOGO 放在左栏顶部（按原图比例缩放，不单独占横栏）
         try (InputStream in = getClass().getResourceAsStream("/meowtu-logo-final.png")) {
             if (in != null) {
@@ -148,8 +199,13 @@ public class MainFrame extends JFrame {
                 int w = 44;
                 int h = Math.max(1, (int) Math.round(w * (double) logo.getHeight() / logo.getWidth()));
                 JLabel logoLab = new JLabel(new ImageIcon(logo.getScaledInstance(w, h, Image.SCALE_SMOOTH)));
-                logoLab.setAlignmentX(Component.CENTER_ALIGNMENT);
-                logoLab.setBorder(BorderFactory.createEmptyBorder(2, 0, 4, 0));
+                if (horizontal) {
+                    logoLab.setHorizontalAlignment(SwingConstants.CENTER);
+                    logoLab.setBorder(BorderFactory.createEmptyBorder());
+                } else {
+                    logoLab.setAlignmentX(Component.CENTER_ALIGNMENT);
+                    logoLab.setBorder(BorderFactory.createEmptyBorder(2, 0, 4, 0));
+                }
                 bar.add(logoLab);
             }
         } catch (Exception ignored) { }
@@ -183,9 +239,13 @@ public class MainFrame extends JFrame {
         JButton fitBtn = FlatWidgets.commandButton("适配", FlatIcons.rect(16), "把图片缩放到窗口大小");
         fitBtn.addActionListener(e -> canvas.fitZoom());
         bar.add(fitBtn);
-        bar.add(Box.createVerticalStrut(6));
-        bar.add(new JSeparator(SwingConstants.HORIZONTAL));
-        bar.add(Box.createVerticalStrut(6));
+        if (horizontal) {
+            // 网格模式不放间隔件（会占格子），按钮之间靠网格间隙分隔
+        } else {
+            bar.add(Box.createVerticalStrut(6));
+            bar.add(new JSeparator(SwingConstants.HORIZONTAL));
+            bar.add(Box.createVerticalStrut(6));
+        }
         ButtonGroup group = new ButtonGroup();
         CanvasPanel.Tool[] tools = {CanvasPanel.Tool.BROWSE, CanvasPanel.Tool.CROP, CanvasPanel.Tool.TEXT,
                 CanvasPanel.Tool.CUTOUT_RECT, CanvasPanel.Tool.PERSPECTIVE};
@@ -199,7 +259,7 @@ public class MainFrame extends JFrame {
             b.addActionListener(e -> setTool(t));
             toolButtons[i] = b;
             bar.add(b);
-            bar.add(Box.createVerticalStrut(4));
+            if (!horizontal) bar.add(Box.createVerticalStrut(4));
         }
         toolButtons[0].setSelected(true);
         return bar;
