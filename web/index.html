@@ -3,12 +3,24 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<script>
+  // 手机/平板适配：软件窗口是固定 1320x840 的桌面布局，窄屏触屏设备上把页面按 1320 宽排版、
+  // 由浏览器整体缩放进屏（点按坐标由浏览器原生换算，不会偏）；桌面端不受影响。
+  if (window.screen && screen.width <= 1024 && window.matchMedia && matchMedia('(pointer: coarse)').matches) {
+    document.querySelector('meta[name="viewport"]').setAttribute('content', 'width=1320, viewport-fit=cover');
+    document.documentElement.classList.add('phonefit');
+  }
+</script>
 <title>喵图 MeowTu</title>
 <link rel="icon" href="meowtu-logo-v2.png">
 <link rel="preconnect" href="https://cjrtnc.leaningtech.com">
 <style>
   html,body{margin:0;height:100%;background:#1e1e1e;overflow:hidden;}
   #app{position:absolute;top:0;bottom:0;left:0;right:0;}
+  /* phonefit：页面已按 1320 宽排版，显示区与骨架高度锁定为软件窗口的 840 */
+  html.phonefit #app{height:840px;bottom:auto;}
+  html.phonefit #shell{height:840px;bottom:auto;}
+  html.phonefit #rotateHint{display:none !important;}
   /* ---------- 秒开骨架：纯 HTML/CSS，先于 Java 环境渲染 ---------- */
   #shell{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;background:#1e1e1e;color:#ddd;
     font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;transition:opacity .6s ease;}
@@ -99,14 +111,14 @@
     tip.innerHTML = msg + '<br>点下面按钮重试；如果反复失败，换 Chrome 打开试试。';
     retry.style.display = 'inline-block';
   }
-  // 触屏设备关掉高清缩放：省内存、省电，图形初始化也更轻（官方选项）
-  const coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+  // 注意：不能开 disableScaling——实测在 DPR>1 的手机上 CheerpJ 会把指针坐标
+  // 按 DPR 倍错位（点哪偏哪），2026-11-19 手机适配实测定位并移除。
   try {
     setProgress(0.03, '正在下载运行环境…');
     await cheerpjInit({
       version: 17,
       status: 'none',
-      disableScaling: coarse,
+      disableScaling: false,
       preloadResources: window.MEOWTU_PRELOAD,
       preloadProgress: (done, total) => {
         if (total > 0) {
