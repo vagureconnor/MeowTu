@@ -42,7 +42,7 @@ function imgSize() {
 /* 安全调用引擎方法（支持同步/异步），失败时提示 */
 async function call(fn, failMsg) {
   if (!editor) { setStatus('编辑引擎未就绪'); return false; }
-  try { await fn(); return true; }
+  try { const r = await fn(); return r !== false; }
   catch (e) { setStatus((failMsg || '操作失败') + '：' + (e && e.message ? e.message : e)); return false; }
 }
 
@@ -109,12 +109,16 @@ document.addEventListener('paste', e => {
 
 /* ---------------- 界面刷新（状态/尺寸/按钮/直方图） ---------------- */
 let histTimer = null;
+let lastState = null;
 function refresh(state) {
   const has = hasImg();
   $('#dropzone').hidden = has;
   wrap.style.visibility = has ? 'visible' : 'hidden';
-  const canU = state && state.canUndo != null ? state.canUndo : has;
-  const canR = state && state.canRedo != null ? state.canRedo : false;
+  // 无 state 的刷新（afterOp 的延迟刷新）沿用最近一次引擎状态，
+  // 否则会把重做按钮误置为禁用（引擎状态事件才是准绳）
+  const st = state || lastState;
+  const canU = st && st.canUndo != null ? st.canUndo : has;
+  const canR = st && st.canRedo != null ? st.canRedo : false;
   $('#btnUndo').disabled = !canU;
   $('#btnRedo').disabled = !canR;
   const s = imgSize();
@@ -141,7 +145,7 @@ function refresh(state) {
   histTimer = setTimeout(drawHist, 160);
 }
 if (editor && typeof editor.on === 'function') {
-  try { editor.on('state', refresh); } catch (e) { /* 忽略 */ }
+  try { editor.on('state', s => { lastState = s; refresh(s); }); } catch (e) { /* 忽略 */ }
 }
 
 /* ---------------- 标签页 & 工具 ---------------- */
@@ -441,11 +445,13 @@ function curveLUT(pts) {
 function applyCurves() {
   if (!editor || typeof editor.setCurves !== 'function') return;
   try {
+    // 引擎 setCurves 接收控制点 [[x,y],...] 并自行按 Catmull-Rom 生成 LUT（与 Java 版一致）；
+    // 本文件的 curveLUT 只供曲线编辑器画线显示用，不要传给引擎。
     editor.setCurves({
-      rgb: curveLUT(curveState.points.rgb),
-      r: curveLUT(curveState.points.r),
-      g: curveLUT(curveState.points.g),
-      b: curveLUT(curveState.points.b)
+      rgb: curveState.points.rgb,
+      r: curveState.points.r,
+      g: curveState.points.g,
+      b: curveState.points.b
     });
   } catch (e) { /* 忽略 */ }
 }
