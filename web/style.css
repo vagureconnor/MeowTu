@@ -1,5 +1,6 @@
 /* 喵图 MeowTu 网页原生版 —— 深色主题，零依赖 */
 :root{
+  color-scheme:dark;
   --bg:#242424;
   --bg-stage:#1c1c1c;
   --panel:#2e2e2e;

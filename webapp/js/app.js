@@ -43,7 +43,7 @@ function imgSize() {
 async function call(fn, failMsg) {
   if (!editor) { setStatus('编辑引擎未就绪'); return false; }
   try { const r = await fn(); return r !== false; }
-  catch (e) { setStatus((failMsg || '操作失败') + '：' + (e && e.message ? e.message : e)); return false; }
+  catch (e) { setStatus((failMsg || '操作失败') + '：' + (e && e.message ? e.message : '未知错误')); return false; }
 }
 
 /* ---------------- 原图快照（对比用） ---------------- */
@@ -388,7 +388,13 @@ const sliderEls = {};
       if (editor) { const p = {}; p[a.key] = v; try { editor.setAdjust(p); } catch (e) { /* 忽略 */ } }
     });
     input.addEventListener('change', () => {
-      if (editor) call(() => editor.commitAdjust(), '应用失败').then(ok => { if (ok) { setStatus('调节已应用'); refresh(); } });
+      if (editor) call(() => editor.commitAdjust(), '应用失败').then(ok => {
+        if (ok) {
+          // 提交后引擎参数已归零，滑杆显示同步归零（与 Java 版松手归零一致）
+          for (const k in sliderEls) { sliderEls[k].input.value = 0; sliderEls[k].val.textContent = '0'; }
+          setStatus('调节已应用'); refresh();
+        }
+      });
     });
     lab.addEventListener('dblclick', () => resetOneSlider(a.key, true));
   }
@@ -503,6 +509,7 @@ function drawCurve() {
   }
 }
 let curveDrag = null;
+let curveSel = -1;
 curveCanvas.addEventListener('pointerdown', e => {
   const { px, py, x, y } = curveXY(e);
   const pts = curveState.points[curveState.channel];
@@ -519,6 +526,7 @@ curveCanvas.addEventListener('pointerdown', e => {
     best = pts.length - 1;
   }
   curveDrag = best;
+  curveSel = best;
   curveCanvas.setPointerCapture(e.pointerId);
   drawCurve(); applyCurves();
 });
@@ -540,9 +548,21 @@ curveCanvas.addEventListener('dblclick', e => {
     const d = Math.hypot(pad + qx / 255 * (W - 2 * pad) - px, pad + (255 - qy) / 255 * (H - 2 * pad) - py);
     if (d < bestD) { bestD = d; best = i; }
   });
-  if (best >= 0) { pts.splice(best, 1); drawCurve(); applyCurves(); }
+  if (best >= 0) { pts.splice(best, 1); curveSel = -1; drawCurve(); applyCurves(); }
 });
-$('#curveChannel').addEventListener('change', e => { curveState.channel = e.target.value; drawCurve(); });
+// 兜底删点：选中一个点后按 Delete/Backspace 删除（双击不灵时用这个）
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+  const pts = curveState.points[curveState.channel];
+  if (curveSel < 0 || curveSel >= pts.length || pts.length <= 2) return;
+  pts.splice(curveSel, 1);
+  curveSel = -1;
+  drawCurve(); applyCurves();
+  setStatus('已删除曲线点');
+});
+$('#curveChannel').addEventListener('change', e => { curveState.channel = e.target.value; curveSel = -1; drawCurve(); });
 $('#btnCurveReset').addEventListener('click', () => {
   curveState.points[curveState.channel] = [[0, 0], [255, 255]];
   drawCurve(); applyCurves();

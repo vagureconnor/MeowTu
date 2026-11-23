@@ -542,9 +542,9 @@
               URL.revokeObjectURL(url);
               resolve(editor.getSize());
             };
-            img.onerror = function (err) {
+            img.onerror = function () {
               URL.revokeObjectURL(url);
-              reject(err || new Error('MT: image decode failed'));
+              reject(new Error('图片已损坏或格式不支持'));
             };
             img.src = url;
           }
