@@ -3,167 +3,230 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<script>
-  // 手机/平板适配：应用本身有竖屏布局（窄屏时左栏变顶部横条、右面板移到底部），
-  // 页面按设备真实尺寸全屏显示即可，不做整体缩放；桌面端不受影响。
-  if (window.screen && screen.width <= 1024 && window.matchMedia && matchMedia('(pointer: coarse)').matches) {
-    document.documentElement.classList.add('phonemax');
-  }
-</script>
 <title>喵图 MeowTu</title>
-<link rel="icon" href="meowtu-logo-v2.png">
-<link rel="preconnect" href="https://cjrtnc.leaningtech.com">
-<style>
-  html,body{margin:0;height:100%;background:#1e1e1e;overflow:hidden;}
-  #app{position:absolute;top:0;bottom:0;left:0;right:0;}
-  /* phonemax：竖屏就是正式布局，关掉横屏提示 */
-  html.phonemax #rotateHint{display:none !important;}
-  /* ---------- 秒开骨架：纯 HTML/CSS，先于 Java 环境渲染 ---------- */
-  #shell{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;background:#1e1e1e;color:#ddd;
-    font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;transition:opacity .6s ease;}
-  #shell.done{opacity:0;pointer-events:none;}
-  .titlebar{height:34px;background:linear-gradient(180deg,#5aa9ff,#4a9eff);display:flex;align-items:center;gap:8px;padding:0 10px;flex:none;}
-  .titlebar img{width:22px;height:18px;object-fit:contain;}
-  .titlebar .t{color:#fff;font-size:13px;font-weight:600;letter-spacing:.5px;}
-  .titlebar .dots{margin-left:auto;display:flex;gap:6px;}
-  .titlebar .dots i{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.55);display:block;}
-  .body{flex:1;display:flex;min-height:0;}
-  .toolbar{width:64px;background:#2b2b2b;border-right:1px solid #1a1a1a;display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:6px;flex:none;}
-  .toolbar img{width:44px;height:36px;object-fit:contain;margin-bottom:4px;}
-  .tbtn{width:52px;padding:6px 0 5px;border-radius:8px;background:#3a3a3a;color:#bbb;font-size:10px;text-align:center;line-height:1.5;}
-  .tbtn.blue{background:#33507a;color:#cfe6ff;}
-  .stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;text-align:center;min-width:0;}
-  .stage img{width:110px;height:89px;object-fit:contain;opacity:.95;}
-  .stage .name{font-size:17px;color:#eee;font-weight:600;}
-  .bar{width:min(320px,70vw);height:6px;border-radius:3px;background:#3a3a3a;overflow:hidden;}
-  .bar i{display:block;height:100%;width:0%;border-radius:3px;background:#4a9eff;transition:width .25s ease;}
-  .stage .pct{font-size:12px;color:#9db8d6;min-height:16px;}
-  .stage .tip{font-size:12px;color:#888;line-height:1.7;max-width:340px;}
-  .stage button{display:none;margin-top:2px;padding:8px 22px;border:0;border-radius:8px;background:#4a9eff;color:#fff;font-size:13px;cursor:pointer;}
-  .panel{width:236px;background:#262626;border-left:1px solid #1a1a1a;padding:10px 12px;flex:none;}
-  .tabs{display:flex;gap:12px;font-size:12px;color:#999;border-bottom:1px solid #3a3a3a;padding-bottom:8px;margin-bottom:12px;}
-  .tabs b{color:#fff;font-weight:600;border-bottom:2px solid #4a9eff;padding-bottom:6px;}
-  .srow{margin:11px 0;}
-  .srow label{display:block;font-size:11px;color:#aaa;margin-bottom:5px;}
-  .srow .track{height:4px;border-radius:2px;background:#3f3f3f;position:relative;}
-  .srow .track::after{content:"";position:absolute;right:22px;top:-4px;width:12px;height:12px;border-radius:50%;background:#ddd;}
-  .srow .fill{position:absolute;left:0;top:0;bottom:0;width:72%;border-radius:2px;background:#4a9eff;}
-  #rotateHint{display:none;position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:11;background:rgba(0,0,0,.72);color:#eee;
-    font-size:12px;padding:7px 14px;border-radius:999px;font-family:"PingFang SC","Microsoft YaHei",sans-serif;}
-  @media (max-width:760px){ .panel{display:none;} .toolbar{width:54px;} .tbtn{width:44px;} }
-  @media (orientation:portrait) and (pointer:coarse){ #rotateHint{display:block;} }
-</style>
-<link rel="preload" href="https://cjrtnc.leaningtech.com/5.0/cj3.wasm" as="fetch" crossorigin="anonymous">
-<script src="https://cjrtnc.leaningtech.com/5.0/loader.js"></script>
-<script src="preload-resources.js"></script>
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="app"></div>
+<div id="app">
 
-<div id="shell">
-  <div class="titlebar"><img src="meowtu-logo-v2.png" alt=""><span class="t">喵图 MeowTu</span><span class="dots"><i></i><i></i><i></i></span></div>
-  <div class="body">
-    <div class="toolbar">
-      <img src="meowtu-logo-v2.png" alt="">
-      <div class="tbtn">打开</div><div class="tbtn">保存</div><div class="tbtn">导出</div>
-      <div class="tbtn">示例图</div><div class="tbtn">撤销</div><div class="tbtn">重做</div>
-      <div class="tbtn">对比</div><div class="tbtn">适配</div>
-      <div class="tbtn blue">浏览</div><div class="tbtn">裁剪</div><div class="tbtn">文字</div><div class="tbtn">抠图</div>
+  <!-- ===== 顶栏 ===== -->
+  <header id="topbar">
+    <div class="brand">
+      <img src="assets/logo.png" alt="喵图 LOGO">
+      <span class="brand-name">喵图 <em>MeowTu</em></span>
     </div>
-    <div class="stage">
-      <img src="meowtu-logo-v2.png" alt="喵图">
-      <div class="name">喵图 MeowTu</div>
-      <div class="bar"><i id="fill"></i></div>
-      <div class="pct" id="pct">正在准备…</div>
-      <div class="tip" id="tip">首次打开需要下载运行环境，约十几秒；<br>之后再打开会快很多。</div>
-      <button id="retry">重新加载</button>
+    <div class="top-actions">
+      <button id="btnOpen" class="tbtn primary" title="打开图片 (Ctrl+O)">
+        <svg viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h4l2 2.5h7A2.5 2.5 0 0 1 21 11v6.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><path d="M3 10.5h18"/></svg>
+        <span>打开</span>
+      </button>
+      <button id="btnSample" class="tbtn" title="生成一张测试图">
+        <svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 18.5 10 13l3.5 3.5L17 13l3.5 4"/></svg>
+        <span>示例图</span>
+      </button>
+      <button id="btnUndo" class="tbtn icon-only" title="撤销 (Ctrl+Z)" disabled>
+        <svg viewBox="0 0 24 24"><path d="M8.5 6.5 5 10l3.5 3.5"/><path d="M5 10h9a5 5 0 0 1 0 10h-3.5"/></svg>
+      </button>
+      <button id="btnRedo" class="tbtn icon-only" title="重做 (Ctrl+Shift+Z)" disabled>
+        <svg viewBox="0 0 24 24"><path d="m15.5 6.5 3.5 3.5-3.5 3.5"/><path d="M19 10h-9a5 5 0 0 0 0 10h3.5"/></svg>
+      </button>
+      <button id="btnCompare" class="tbtn" title="按住查看原图，松开恢复">
+        <svg viewBox="0 0 24 24"><path d="M12 3.5v17"/><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 15.5 10 12l2 2v-8.5"/></svg>
+        <span>对比</span>
+      </button>
+      <button id="btnSave" class="tbtn" title="按上次格式快速导出 (Ctrl+S)">
+        <svg viewBox="0 0 24 24"><path d="M5 3.5h11.5L20.5 7.5v12a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19.5v-15A1.5 1.5 0 0 1 5 3.5z"/><path d="M8 3.5V9h8V3.5"/><rect x="7.5" y="13.5" width="9" height="7"/></svg>
+        <span>保存</span>
+      </button>
     </div>
-    <div class="panel">
-      <div class="tabs"><b>调节</b><span>滤镜</span><span>几何</span><span>文字</span><span>抠图</span></div>
-      <div class="srow"><label>曝光</label><div class="track"><div class="fill"></div></div></div>
-      <div class="srow"><label>对比度</label><div class="track"><div class="fill"></div></div></div>
-      <div class="srow"><label>色温</label><div class="track"><div class="fill"></div></div></div>
-      <div class="srow"><label>饱和度</label><div class="track"><div class="fill"></div></div></div>
-      <div class="srow"><label>高光</label><div class="track"><div class="fill"></div></div></div>
-      <div class="srow"><label>阴影</label><div class="track"><div class="fill"></div></div></div>
-      <div class="srow"><label>清晰度</label><div class="track"><div class="fill"></div></div></div>
-    </div>
+  </header>
+
+  <!-- ===== 主区域 ===== -->
+  <div id="main">
+
+    <!-- 工具栏：桌面竖排 / 手机横排 -->
+    <nav id="toolrail" aria-label="工具">
+      <button class="tool active" data-tool="browse" title="浏览/平移">
+        <svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/><path d="m12 3-2.5 2.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l-2.5 2.5"/></svg>
+        <span>浏览</span>
+      </button>
+      <button class="tool" data-tool="crop" title="裁剪：到几何页进入裁剪模式">
+        <svg viewBox="0 0 24 24"><path d="M6.5 2.5v14A2 2 0 0 0 8.5 18.5h13"/><path d="M2.5 6.5h14A2 2 0 0 1 18.5 8.5v13"/></svg>
+        <span>裁剪</span>
+      </button>
+      <button class="tool" data-tool="text" title="文字：添加后拖动定位">
+        <svg viewBox="0 0 24 24"><path d="M5 5.5V4h14v1.5"/><path d="M12 4v16"/><path d="M9 20h6"/></svg>
+        <span>文字</span>
+      </button>
+      <button class="tool" data-tool="cutout" title="抠图：框选主体后执行">
+        <svg viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.4"/><circle cx="6" cy="17" r="2.4"/><path d="M8.1 8.9 20 19M8.1 15.1 20 5"/></svg>
+        <span>抠图</span>
+      </button>
+      <button class="tool" data-tool="perspective" title="透视矫正（即将上线）">
+        <svg viewBox="0 0 24 24"><path d="M5.5 4.5h13l2 15h-17z"/><path d="M12 4.5 11 19.5M5.8 12h12.4"/></svg>
+        <span>透视</span>
+      </button>
+    </nav>
+
+    <!-- 画布区 -->
+    <section id="stage">
+      <div id="canvasWrap">
+        <canvas id="editorCanvas"></canvas>
+        <canvas id="overlay"></canvas>
+        <img id="compareView" alt="原图对比">
+      </div>
+
+      <!-- 无图时的投放区 -->
+      <div id="dropzone">
+        <svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 18.5 10 13l3.5 3.5L17 13l3.5 4"/><path d="M12 2v3M10.2 3.8 12 2l1.8 1.8"/></svg>
+        <p class="dz-title">把图片拖到这里</p>
+        <p class="dz-sub">或点「打开」选文件，也可以 Ctrl/Cmd+V 直接粘贴截图</p>
+      </div>
+
+      <!-- 选框模式（裁剪/抠图）浮动确认条 -->
+      <div id="selBar" hidden>
+        <span id="selHint">拖出选框</span>
+        <button id="selCancel" class="mini-btn">
+          <svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5 5 19"/></svg>取消
+        </button>
+        <button id="selOk" class="mini-btn ok">
+          <svg viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-11"/></svg>确认
+        </button>
+      </div>
+
+      <!-- 忙碌提示（抠图等重活） -->
+      <div id="busy" hidden>
+        <div class="spinner"></div>
+        <p id="busyText">处理中…</p>
+      </div>
+    </section>
+
+    <!-- 右侧 / 底部面板 -->
+    <aside id="panel">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="adjust">调节</button>
+        <button class="tab" data-tab="filters">滤镜</button>
+        <button class="tab" data-tab="geometry">几何</button>
+        <button class="tab" data-tab="text">文字</button>
+        <button class="tab" data-tab="cutout">抠图</button>
+      </div>
+
+      <div class="tab-pages">
+        <!-- 调节 -->
+        <section class="page active" data-page="adjust">
+          <div id="sliderBox"></div>
+          <button id="btnResetAdjust" class="block-btn">重置全部</button>
+          <div class="group-title">曲线</div>
+          <div class="curve-head">
+            <label>通道
+              <select id="curveChannel">
+                <option value="rgb">RGB 合成</option>
+                <option value="r">红</option>
+                <option value="g">绿</option>
+                <option value="b">蓝</option>
+              </select>
+            </label>
+            <button id="btnCurveReset" class="mini-btn">重置曲线</button>
+          </div>
+          <canvas id="curveCanvas" width="520" height="360"></canvas>
+          <p class="hint">在曲线上点一下加点，拖动调点，双击删点。</p>
+          <div class="group-title">直方图</div>
+          <canvas id="histCanvas" width="520" height="128"></canvas>
+        </section>
+
+        <!-- 滤镜 -->
+        <section class="page" data-page="filters">
+          <div id="filterGrid" class="filter-grid"></div>
+          <p class="hint" id="filterEmpty" hidden>滤镜模块未就绪。</p>
+        </section>
+
+        <!-- 几何 -->
+        <section class="page" data-page="geometry">
+          <div class="group-title">旋转 / 翻转</div>
+          <div class="btn-grid">
+            <button id="btnRotL" class="cell-btn">
+              <svg viewBox="0 0 24 24"><path d="M4.5 9.5A8.5 8.5 0 1 1 3.5 14"/><path d="M4 4.5v5h5"/></svg>左转
+            </button>
+            <button id="btnRotR" class="cell-btn">
+              <svg viewBox="0 0 24 24"><path d="M19.5 9.5A8.5 8.5 0 1 0 20.5 14"/><path d="M20 4.5v5h-5"/></svg>右转
+            </button>
+            <button id="btnFlipH" class="cell-btn">
+              <svg viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2.5 3"/><path d="M8.5 8 4.5 12l4 4zM15.5 8l4 4-4 4z"/></svg>水平翻转
+            </button>
+            <button id="btnFlipV" class="cell-btn">
+              <svg viewBox="0 0 24 24"><path d="M3 12h18" stroke-dasharray="2.5 3"/><path d="M8 8.5 12 4.5l4 4zM8 15.5l4 4 4-4z"/></svg>垂直翻转
+            </button>
+          </div>
+          <div class="group-title">尺寸</div>
+          <div class="size-row">
+            <label>宽 <input id="inW" type="number" min="1" inputmode="numeric"></label>
+            <label>高 <input id="inH" type="number" min="1" inputmode="numeric"></label>
+          </div>
+          <label class="check-row"><input id="chkAspect" type="checkbox" checked> 保持比例</label>
+          <button id="btnResize" class="block-btn">应用尺寸</button>
+          <div class="group-title">裁剪</div>
+          <button id="btnCropMode" class="block-btn">进入裁剪模式</button>
+          <p class="hint">进入后在图片上拖出选框，点「确认」完成裁剪。</p>
+        </section>
+
+        <!-- 文字 -->
+        <section class="page" data-page="text">
+          <label class="field">文字内容
+            <input id="inText" type="text" placeholder="输入要加的文字">
+          </label>
+          <label class="field">字号
+            <input id="inTextSize" type="number" min="8" max="400" value="48">
+          </label>
+          <label class="field">颜色
+            <input id="inTextColor" type="color" value="#ffffff">
+          </label>
+          <label class="check-row"><input id="chkTextBold" type="checkbox"> 粗体</label>
+          <button id="btnAddText" class="block-btn primary">添加文字</button>
+          <p class="hint">添加后在图片上拖动文字可改位置；点文字页之外的标签会退出拖动。</p>
+          <div id="textList"></div>
+          <button id="btnCommitTexts" class="block-btn">应用到图片</button>
+        </section>
+
+        <!-- 抠图 -->
+        <section class="page" data-page="cutout">
+          <p class="desc">框住要保留的主体，工具会把框外的背景去掉，生成透明底图片。框要把主体完整包住、尽量贴边，结果更准。</p>
+          <button id="btnCutMode" class="block-btn primary">框选抠图</button>
+          <p class="hint">进入后在图片上拖出选框，点「确认」开始抠图（大图会慢一点）。</p>
+        </section>
+      </div>
+
+      <!-- 导出 -->
+      <div id="exportBox">
+        <label>格式
+          <select id="selFormat">
+            <option value="png">PNG</option>
+            <option value="jpeg">JPEG</option>
+            <option value="webp">WebP</option>
+          </select>
+        </label>
+        <label id="qualityRow">质量 <input id="inQuality" type="range" min="10" max="100" value="92"><span id="qualityVal">92</span></label>
+        <button id="btnExport" class="tbtn primary">
+          <svg viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M4 17.5v2a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19.5v-2"/></svg>
+          <span>导出下载</span>
+        </button>
+      </div>
+    </aside>
   </div>
-</div>
-<div id="rotateHint">手机建议横屏使用，编辑区更大</div>
 
-<script type="module">
-  const fill = document.getElementById('fill');
-  const pct = document.getElementById('pct');
-  const tip = document.getElementById('tip');
-  const shell = document.getElementById('shell');
-  const retry = document.getElementById('retry');
-  retry.addEventListener('click', () => location.reload());
-  function setProgress(ratio, text) {
-    fill.style.width = Math.round(Math.max(0, Math.min(1, ratio)) * 100) + '%';
-    pct.textContent = text;
-  }
-  function fail(msg) {
-    pct.textContent = '加载遇到问题';
-    tip.innerHTML = msg + '<br>点下面按钮重试；如果反复失败，换 Chrome 打开试试。';
-    retry.style.display = 'inline-block';
-  }
-  // 注意：不能开 disableScaling——实测在 DPR>1 的手机上 CheerpJ 会把指针坐标
-  // 按 DPR 倍错位（点哪偏哪），2026-11-19 手机适配实测定位并移除。
-  try {
-    setProgress(0.03, '正在下载运行环境…');
-    await cheerpjInit({
-      version: 17,
-      status: 'none',
-      disableScaling: false,
-      preloadResources: window.MEOWTU_PRELOAD,
-      preloadProgress: (done, total) => {
-        if (total > 0) {
-          if (done >= total) setProgress(0.6, '下载完成，正在启动 Java 环境…');
-          else setProgress(0.03 + 0.57 * (done / total), '正在下载运行环境… ' + Math.round(done / total * 100) + '%');
-        }
-      }
-    });
-    setProgress(0.65, '运行环境就绪，正在打开喵图…');
-    cheerpjCreateDisplay(-1, -1, document.getElementById('app'));
-    const jarPromise = cheerpjRunJar('/app/dl/meowtu.jar');
-    jarPromise.then(() => setProgress(0.85, '正在打开喵图…')).catch(e => fail('启动失败：' + e));
-    // 等真正的窗口画出来再撤骨架：轮询显示画布的像素
-    const probe = document.createElement('canvas');
-    probe.width = 48; probe.height = 48;
-    const pctx = probe.getContext('2d', { willReadFrequently: true });
-    let up = false;
-    for (let i = 0; i < 240 && !up; i++) {
-      await new Promise(r => setTimeout(r, 1500));
-      const c = document.querySelector('#app canvas');
-      if (c && c.width > 200 && c.height > 200) {
-        try {
-          pctx.drawImage(c, 0, 0, 48, 48);
-          const d = pctx.getImageData(0, 0, 48, 48).data;
-          const colors = new Set();
-          let blue = 0;
-          for (let p = 0; p < d.length; p += 8) {
-            colors.add(d[p] + ',' + d[p + 1] + ',' + d[p + 2]);
-            if (d[p] < 130 && d[p + 1] > 110 && d[p + 1] < 210 && d[p + 2] > 200) blue++;
-          }
-          // 应用窗口的标志：顶部蓝色标题栏出现，或画面颜色明显丰富（空画布只有一种深灰）
-          if (blue >= 3 || colors.size >= 12) up = true;
-        } catch (e) { /* 画布还不可读，继续等 */ }
-      }
-      if (!up && i === 40) setProgress(0.9, '还在努力打开，网络慢时要多等一会儿…');
-    }
-    if (up) {
-      setProgress(1, '打开成功');
-      shell.classList.add('done');
-      setTimeout(() => shell.remove(), 800);
-      const hint = document.getElementById('rotateHint');
-      if (hint) setTimeout(() => hint.remove(), 6000);
-    } else {
-      fail('等待时间过长，应用没有出现。');
-    }
-  } catch (e) {
-    fail('初始化失败：' + e);
-  }
-</script>
+  <!-- ===== 状态栏 ===== -->
+  <footer id="statusbar">
+    <span id="statusText">就绪</span>
+    <a href="java.html" style="color:#8a94a6;text-decoration:none;white-space:nowrap" title="在浏览器里运行 Java 原版（加载较慢）">Java 原版</a>
+    <span id="sizeInfo"></span>
+  </footer>
+</div>
+
+<input id="fileInput" type="file" accept="image/*" hidden>
+
+<script src="js/filters.js"></script>
+<script src="js/grabcut.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
