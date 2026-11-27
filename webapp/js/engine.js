@@ -339,9 +339,9 @@
   // Java 版调节与曲线是两次独立提交；网页版按契约合并预览/烘焙，顺序取：
   // 先 LutEngine 的逐点段（LUT+影调+色彩），再曲线 LUT，最后空间段（清晰度、锐化），与 LutEngine 内部“空间项最后”一致。
 
-  function runPipeline(srcCanvas, params, curveLuts) {
+  function runPipeline(srcCanvas, params, curveLuts, filterId) {
     var adjIdentity = paramsIsIdentity(params);
-    if (adjIdentity && !curveLuts) return srcCanvas; // 恒等：直接返回源（调用方保证不原地改它）
+    if (adjIdentity && !curveLuts && !filterId) return srcCanvas; // 恒等：直接返回源（调用方保证不原地改它）
     var w = srcCanvas.width, h = srcCanvas.height;
     var work = makeCanvas(w, h);
     var ctx = work.getContext('2d', { willReadFrequently: true });
@@ -360,6 +360,11 @@
       if (params.clarity !== 0) px = applyClarity(px, w, h, params.clarity);
       if (params.sharpen > 0) px = applySharpen(px, w, h, params.sharpen);
       argbToImageData(px, data);
+    }
+    if (filterId) {
+      // 滤镜是管线的最后一段：只按当前状态应用一次（状态式，不烘焙、重复点击不叠加）
+      var F = (typeof window !== 'undefined') ? window.MTFilters : null;
+      if (F && typeof F.apply === 'function') { try { F.apply(imgData, filterId); } catch (e) { /* 滤镜异常不影响管线 */ } }
     }
     ctx.putImageData(imgData, 0, 0);
     return work;
@@ -489,6 +494,7 @@
     var curvePts = freshCurvePoints();
     var curveLuts = null;     // combinedCurveLuts 结果，恒等为 null
     var texts = [];
+    var activeFilter = null;   // 当前生效的滤镜 id（状态式：不烘焙、不叠加；null = 无滤镜）
     var undoStack = [], redoStack = [];
     var stateListeners = [];
     var lastSettled = null;   // 上一个「已安定」状态快照（调节检查点用）
@@ -498,6 +504,7 @@
         hasImage: !!base,
         canUndo: undoStack.length > 0,
         canRedo: redoStack.length > 0,
+        filter: activeFilter,
         w: base ? base.width : 0,
         h: base ? base.height : 0
       };
@@ -518,7 +525,7 @@
         emitState();
         return;
       }
-      var out = runPipeline(previewSrc, params, curveLuts);
+      var out = runPipeline(previewSrc, params, curveLuts, activeFilter);
       previewCanvas = out;
       if (displayCanvas.width !== out.width || displayCanvas.height !== out.height) {
         displayCanvas.width = out.width;
@@ -543,7 +550,8 @@
         base: base ? cloneCanvas(base) : null,
         params: p,
         curves: curves,
-        texts: texts.map(function (t) { var o = {}; for (var k in t) o[k] = t[k]; return o; })
+        texts: texts.map(function (t) { var o = {}; for (var k in t) o[k] = t[k]; return o; }),
+        filter: activeFilter
       };
     }
 
@@ -557,6 +565,7 @@
       }
       curveLuts = combinedCurveLuts(curvePts);
       texts = s.texts.map(function (t) { var o = {}; for (var k in t) o[k] = t[k]; return o; });
+      activeFilter = s.filter || null;
       refreshPreviewSrc();
       render();
       lastSettled = snapshotState();
@@ -564,7 +573,7 @@
 
     /** 当前完整效果的全分辨率合成：base + 调节 + 曲线 + 文字（所见即所得）。 */
     function bakeCurrent() {
-      var out = runPipeline(base, params, curveLuts);
+      var out = runPipeline(base, params, curveLuts, activeFilter);
       if (out === base) out = cloneCanvas(base);
       if (texts.length) drawTexts(out.getContext('2d'), texts, 1);
       return out;
@@ -583,6 +592,7 @@
       curvePts = freshCurvePoints();
       curveLuts = null;
       texts = [];
+      activeFilter = null;
       refreshPreviewSrc();
       render();
       lastSettled = snapshotState();
@@ -597,6 +607,7 @@
       curvePts = freshCurvePoints();
       curveLuts = null;
       texts = [];
+      activeFilter = null;
       refreshPreviewSrc();
       render();
       lastSettled = snapshotState();
@@ -692,7 +703,7 @@
        *  只保留给显式「合并」语义与兼容调用。 */
       commitAdjust: function () {
         if (!base) return false;
-        if (paramsIsIdentity(params) && !curveLuts && !texts.length) { render(); return false; }
+        if (paramsIsIdentity(params) && !curveLuts && !texts.length && !activeFilter) { render(); return false; }
         commitImage(bakeCurrent());
         return true;
       },
@@ -755,36 +766,37 @@
         return out;
       },
 
-      // ----- 滤镜（实现位于 filters.js，本引擎只负责调用与烘焙） -----
+      // ----- 滤镜（实现位于 filters.js；引擎只记录状态，管线渲染时应用一次） -----
 
+      /** 滤镜（状态式）：只记录当前滤镜 id，渲染管线按状态应用一次。
+       *  重复点击同一个滤镜不叠加；点另一个滤镜直接替换；撤销可退回上一个滤镜。 */
       applyFilter: function (name) {
         if (!base) return false;
         var F = window.MTFilters;
         if (!F || typeof F.apply !== 'function') return false; // 不存在时静默跳过
-        var work = bakeCurrent(); // 滤镜作用在当前所见效果上（调节/曲线/文字先合并）
-        var wctx = work.getContext('2d', { willReadFrequently: true });
-        var handled = false;
-        // 先试 ImageData 约定：返回新 ImageData 或原地改像素都认
-        try {
-          var imgData = wctx.getImageData(0, 0, work.width, work.height);
-          var before = sampleChecksum(imgData.data);
-          var ret = F.apply(imgData, name);
-          if (ret && ret.data && ret.width === work.width && ret.height === work.height) {
-            wctx.putImageData(ret, 0, 0);
-            handled = true;
-          } else if (sampleChecksum(imgData.data) !== before) {
-            wctx.putImageData(imgData, 0, 0);
-            handled = true;
-          }
-        } catch (e) { /* 落到 ctx 约定再试 */ }
-        // 再试 ctx 约定
-        if (!handled) {
-          try { F.apply(wctx, name); handled = true; } catch (e) { return false; }
-        }
-        if (!handled) return false;
-        commitImage(work);
+        if (activeFilter === name) return true; // 已是该滤镜：不重复应用、不叠加
+        undoStack.push(snapshotState());
+        while (undoStack.length > HISTORY_MAX) undoStack.shift();
+        redoStack.length = 0;
+        activeFilter = name;
+        render();
+        lastSettled = snapshotState();
         return true;
       },
+
+      /** 取消滤镜，回到无滤镜状态（同样可撤销）。 */
+      clearFilter: function () {
+        if (!base || !activeFilter) return false;
+        undoStack.push(snapshotState());
+        while (undoStack.length > HISTORY_MAX) undoStack.shift();
+        redoStack.length = 0;
+        activeFilter = null;
+        render();
+        lastSettled = snapshotState();
+        return true;
+      },
+
+      getFilter: function () { return activeFilter; },
 
       // ----- 几何（烘焙进 base 并推栈） -----
 
@@ -972,7 +984,7 @@
         var typeMap = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp' };
         var type = typeMap[options.format || 'png'] || 'image/png';
         var quality = typeof options.quality === 'number' ? clamp(options.quality, 0, 1) : 0.92;
-        var out = runPipeline(base, params, curveLuts);
+        var out = runPipeline(base, params, curveLuts, activeFilter);
         if (texts.length) {
           if (out === base) out = cloneCanvas(base);
           drawTexts(out.getContext('2d'), texts, 1);

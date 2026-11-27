@@ -236,6 +236,7 @@ select{
   background:var(--panel-2);border:1px solid var(--line);font-size:13.5px;
 }
 .filter-btn:active{background:var(--accent-dim);border-color:var(--accent)}
+.filter-btn.active{background:var(--accent-dim);border-color:var(--accent);font-weight:600}
 
 /* 几何 */
 .btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}

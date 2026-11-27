@@ -818,6 +818,19 @@ function drawHist() {
     if (page) page.hidden = true;
     return;
   }
+  const btnById = new Map();
+  const markActive = fid => {
+    btnById.forEach((b, id) => b.classList.toggle('active', (id || null) === (fid || null)));
+  };
+  const noneBtn = document.createElement('button');
+  noneBtn.className = 'filter-btn active';
+  noneBtn.textContent = '无滤镜';
+  noneBtn.addEventListener('click', async () => {
+    if (!hasImg()) { setStatus('先打开一张图片'); return; }
+    if (await call(() => editor.clearFilter(), '取消滤镜失败')) afterOp('已取消滤镜');
+  });
+  grid.appendChild(noneBtn);
+  btnById.set(null, noneBtn);
   for (const f of window.MTFilters.list) {
     const b = document.createElement('button');
     b.className = 'filter-btn';
@@ -827,6 +840,10 @@ function drawHist() {
       if (await call(() => editor.applyFilter(f.id), '滤镜失败')) afterOp('已应用滤镜：' + f.name);
     });
     grid.appendChild(b);
+    btnById.set(f.id, b);
+  }
+  if (editor && typeof editor.on === 'function') {
+    try { editor.on('state', s => markActive(s && s.filter)); } catch (e) { /* 忽略 */ }
   }
 })();
 
