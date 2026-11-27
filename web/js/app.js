@@ -399,8 +399,9 @@ function drawOverlay() {
     ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.closePath(); ctx.stroke();
+    const handleR = (window.matchMedia && window.matchMedia('(pointer:coarse)').matches) ? 13 : 11;
     for (const p of pts) {
-      ctx.beginPath(); ctx.arc(p.x, p.y, 11 * dpr, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(p.x, p.y, handleR * dpr, 0, Math.PI * 2);
       ctx.fillStyle = '#4da3ff'; ctx.fill();
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5 * dpr; ctx.stroke();
     }
@@ -438,11 +439,11 @@ overlay.addEventListener('pointerdown', e => {
     selection = clampSel({ x: p.x, y: p.y, w: 0, h: 0 });
     overlay.setPointerCapture(e.pointerId);
   } else if (mode === 'persp' && perspQuad) {
-    // 命中判定在显示像素空间做（半径 20px），与图分辨率无关
+    // 命中判定在显示像素空间做，与图分辨率无关；触摸时放大到 32px，鼠标保持 20px 精度
     const cr = editorCanvas.getBoundingClientRect();
     const sz = imgSize();
     if (!sz) return;
-    let best = -1, bestD = 20;
+    let best = -1, bestD = e.pointerType === 'touch' ? 32 : 20;
     perspQuad.forEach((q, i) => {
       const qx = cr.left + q.x / sz.w * cr.width, qy = cr.top + q.y / sz.h * cr.height;
       const d = Math.hypot(qx - e.clientX, qy - e.clientY);
@@ -687,19 +688,27 @@ function drawCurve() {
   }
   ctx.stroke();
   ctx.fillStyle = '#fff';
+  const ptR = (window.matchMedia && window.matchMedia('(pointer:coarse)').matches) ? 11 : 7;
   for (const [x, y] of pts) {
     const px = pad + x / 255 * (W - 2 * pad), py = pad + (255 - y) / 255 * (H - 2 * pad);
-    ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(px, py, ptR, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = CH_COLORS[curveState.channel]; ctx.lineWidth = 2.5; ctx.stroke();
   }
 }
 let curveDrag = null;
 let curveSel = -1;
+/* 抓取半径按显示像素定：触摸 34px、鼠标 20px，再换算成画布内部像素
+   （画布 520 宽显示约 272px，内部 26px 只相当于显示 13.6px，手指根本抓不准） */
+function curveGrabRadius(e) {
+  const r = curveCanvas.getBoundingClientRect();
+  const per = r.width ? curveCanvas.width / r.width : 1;
+  return (e && e.pointerType === 'touch' ? 34 : 20) * per;
+}
 curveCanvas.addEventListener('pointerdown', e => {
   const { px, py, x, y } = curveXY(e);
   const pts = curveState.points[curveState.channel];
   const pad = 14, W = curveCanvas.width, H = curveCanvas.height;
-  let best = -1, bestD = 26;
+  let best = -1, bestD = curveGrabRadius(e);
   pts.forEach(([qx, qy], i) => {
     const d = Math.hypot(pad + qx / 255 * (W - 2 * pad) - px, pad + (255 - qy) / 255 * (H - 2 * pad) - py);
     if (d < bestD) { bestD = d; best = i; }
@@ -723,12 +732,13 @@ curveCanvas.addEventListener('pointermove', e => {
   drawCurve(); applyCurves();
 });
 curveCanvas.addEventListener('pointerup', () => { curveDrag = null; checkpoint(); });
+curveCanvas.addEventListener('pointercancel', () => { if (curveDrag != null) { curveDrag = null; checkpoint(); } });
 curveCanvas.addEventListener('dblclick', e => {
   const { px, py } = curveXY(e);
   const pts = curveState.points[curveState.channel];
   if (pts.length <= 2) return;
   const pad = 14, W = curveCanvas.width, H = curveCanvas.height;
-  let best = -1, bestD = 26;
+  let best = -1, bestD = curveGrabRadius(null);
   pts.forEach(([qx, qy], i) => {
     const d = Math.hypot(pad + qx / 255 * (W - 2 * pad) - px, pad + (255 - qy) / 255 * (H - 2 * pad) - py);
     if (d < bestD) { bestD = d; best = i; }

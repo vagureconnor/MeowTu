@@ -21,8 +21,11 @@ body{
   background:var(--bg);color:var(--text);
   overflow:hidden;
   -webkit-tap-highlight-color:transparent;
+  /* 禁双击缩放（不靠 user-scalable=no）+ 整页不橡皮筋回弹 */
+  touch-action:manipulation;
+  overscroll-behavior:none;
 }
-button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;touch-action:manipulation}
 button:disabled{opacity:.38;cursor:default}
 svg{display:block}
 
@@ -30,9 +33,9 @@ svg{display:block}
 
 /* ===== 顶栏 ===== */
 #topbar{
-  height:var(--topbar-h);flex:0 0 auto;
+  height:calc(var(--topbar-h) + env(safe-area-inset-top));flex:0 0 auto;
   display:flex;align-items:center;gap:12px;
-  padding:0 12px;
+  padding:0 calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left));
   background:var(--panel);border-bottom:1px solid var(--line);
   padding-top:env(safe-area-inset-top);
 }
@@ -40,7 +43,7 @@ svg{display:block}
 .brand img{width:36px;height:36px;object-fit:contain;border-radius:8px}
 .brand-name{font-size:17px;font-weight:600;white-space:nowrap}
 .brand-name em{font-style:normal;color:var(--muted);font-weight:500;font-size:14px}
-.top-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.top-actions{display:flex;align-items:center;gap:8px;margin-left:auto;overscroll-behavior:contain}
 .tbtn{
   display:inline-flex;align-items:center;justify-content:center;gap:7px;
   min-height:40px;padding:0 14px;
@@ -60,6 +63,7 @@ svg{display:block}
 #toolrail{
   flex:0 0 64px;display:flex;flex-direction:column;align-items:stretch;gap:6px;
   padding:10px 7px;background:var(--panel);border-right:1px solid var(--line);
+  overscroll-behavior:contain;
 }
 .tool{
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
@@ -74,6 +78,7 @@ svg{display:block}
   display:flex;align-items:center;justify-content:center;
   background:var(--bg-stage);
   padding:14px;
+  overscroll-behavior:none;
 }
 #stage.dragging::after{
   content:"";position:absolute;inset:8px;border:2px dashed var(--accent);border-radius:14px;pointer-events:none;
@@ -109,7 +114,7 @@ svg{display:block}
 
 /* 选框确认条 */
 #selBar{
-  position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:5;
+  position:absolute;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:5;
   display:flex;align-items:center;gap:10px;
   background:rgba(30,30,30,.94);border:1px solid var(--line);border-radius:999px;
   padding:7px 8px 7px 16px;box-shadow:0 8px 28px rgba(0,0,0,.5);
@@ -168,7 +173,7 @@ svg{display:block}
 }
 .tab.active{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
 .tab[hidden]{display:none}
-.tab-pages{flex:1 1 auto;overflow-y:auto;min-height:0}
+.tab-pages{flex:1 1 auto;overflow-y:auto;min-height:0;overscroll-behavior:contain}
 .page{display:none;padding:14px 14px 18px}
 .page.active{display:block}
 .page[hidden]{display:none}
@@ -205,6 +210,8 @@ select{
 .slider-row .sr-val{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
 .slider-row input[type="range"]{
   width:100%;height:30px;-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer;
+  /* 横向拖动归滑杆（不被面板滚动抢走），纵向滑动仍可滚面板 */
+  touch-action:pan-y;
 }
 .slider-row input[type="range"]::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:#565656}
 .slider-row input[type="range"]::-webkit-slider-thumb{
@@ -260,15 +267,16 @@ select{
 }
 #exportBox label{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
 #qualityRow{flex:1;min-width:0}
-#qualityRow input[type="range"]{flex:1;accent-color:var(--accent);min-width:40px}
+#qualityRow input[type="range"]{flex:1;accent-color:var(--accent);min-width:40px;touch-action:pan-y}
 #qualityVal{font-variant-numeric:tabular-nums;color:var(--text)}
 #exportBox .tbtn{min-height:42px}
 
 /* ===== 状态栏 ===== */
 #statusbar{
-  height:var(--statusbar-h);flex:0 0 auto;
+  height:calc(var(--statusbar-h) + env(safe-area-inset-bottom));flex:0 0 auto;
   display:flex;align-items:center;justify-content:space-between;gap:14px;
-  padding:0 12px;padding-bottom:env(safe-area-inset-bottom);
+  padding:0 calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left));
+  padding-bottom:env(safe-area-inset-bottom);
   background:var(--panel);border-top:1px solid var(--line);
   font-size:12.5px;color:var(--muted);
 }
@@ -306,5 +314,22 @@ select{
   }
   .tab{min-height:44px;padding:10px 2px}
   .block-btn,.cell-btn{min-height:46px}
-  #selBar{bottom:12px;max-width:94vw}
+  #selBar{bottom:calc(12px + env(safe-area-inset-bottom));max-width:94vw}
+}
+
+/* ===== 粗指针（触摸设备，含平板） ===== */
+@media (pointer:coarse){
+  .tbtn{min-height:44px}
+  .tbtn.icon-only{width:44px}
+  .tab{min-height:44px}
+  .mini-btn{min-height:44px;padding:0 16px;font-size:14px}
+  .block-btn{min-height:46px}
+  select{min-height:44px}
+  .check-row{min-height:40px}
+  .check-row input{width:24px;height:24px}
+  .text-item button{min-width:40px;min-height:40px;padding:8px 10px}
+  /* 滑杆：更高的命中行 + 更大的拇指 */
+  .slider-row input[type="range"]{height:40px}
+  .slider-row input[type="range"]::-webkit-slider-thumb{width:28px;height:28px;margin-top:-11.5px}
+  .slider-row input[type="range"]::-moz-range-thumb{width:28px;height:28px}
 }
