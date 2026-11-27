@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>喵图 MeowTu</title>
 <link rel="icon" href="assets/logo.png">
+<link rel="apple-touch-icon" href="assets/logo.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -17,7 +18,7 @@
       <span class="brand-name">喵图 <em>MeowTu</em></span>
     </div>
     <div class="top-actions">
-      <button id="btnOpen" class="tbtn primary" title="打开图片 (Ctrl+O)">
+      <button id="btnOpen" class="tbtn primary" title="打开图片或工程 (Ctrl+O)">
         <svg viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h4l2 2.5h7A2.5 2.5 0 0 1 21 11v6.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><path d="M3 10.5h18"/></svg>
         <span>打开</span>
       </button>
@@ -38,6 +39,10 @@
       <button id="btnSave" class="tbtn" title="按上次格式快速导出 (Ctrl+S)">
         <svg viewBox="0 0 24 24"><path d="M5 3.5h11.5L20.5 7.5v12a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19.5v-15A1.5 1.5 0 0 1 5 3.5z"/><path d="M8 3.5V9h8V3.5"/><rect x="7.5" y="13.5" width="9" height="7"/></svg>
         <span>保存</span>
+      </button>
+      <button id="btnSaveProject" class="tbtn" title="保存完整图层工程（.meowtu），之后可重新打开继续编辑">
+        <svg viewBox="0 0 24 24"><path d="m12 3.5 9 5-9 5-9-5z"/><path d="m3.8 13.2 8.2 4.6 8.2-4.6"/><path d="m3.8 17.2 8.2 4.6 8.2-4.6"/></svg>
+        <span>保存工程</span>
       </button>
     </div>
   </header>
@@ -111,12 +116,19 @@
         <button class="tab" data-tab="geometry">几何</button>
         <button class="tab" data-tab="text">文字</button>
         <button class="tab" data-tab="cutout">抠图</button>
+        <button class="tab" data-tab="layers">图层</button>
+        <button class="tab" data-tab="select">选区</button>
+        <button class="tab" data-tab="brush">画笔</button>
+        <button class="tab" data-tab="history">历史</button>
+        <button class="tab" data-tab="smart">智能</button>
       </div>
 
       <div class="tab-pages">
         <!-- 调节 -->
         <section class="page active" data-page="adjust">
+          <button id="btnSmart" class="block-btn primary">智能一键优化</button>
           <div id="sliderBox"></div>
+          <div id="adjBox"></div>
           <button id="btnResetAdjust" class="block-btn">重置全部</button>
           <div class="group-title">曲线</div>
           <div class="curve-head">
@@ -140,6 +152,11 @@
         <section class="page" data-page="filters">
           <div id="filterGrid" class="filter-grid"></div>
           <p class="hint" id="filterEmpty" hidden>滤镜模块未就绪。</p>
+          <div class="group-title">电影调色（LUT）</div>
+          <div id="lutGrid" class="filter-grid"></div>
+          <div id="lutStrengthBox"></div>
+          <button id="btnLutImport" class="block-btn">导入 .cube 文件</button>
+          <p class="hint">点格子把调色套到当前图层（状态式，可撤销）；悬停格子先在图上预览。强度滑杆控制调色与原图的混合。</p>
         </section>
 
         <!-- 几何 -->
@@ -172,6 +189,9 @@
           <div class="group-title">透视矫正</div>
           <button id="btnPerspMode" class="block-btn">进入透视矫正</button>
           <p class="hint">把四个角拖到拍歪的文档/画框四角，点「确认」拉直。</p>
+          <div class="group-title">自由变换</div>
+          <button id="btnTransform" class="block-btn">自由变换（Ctrl+T）</button>
+          <p class="hint">只变换当前图层：拖角缩放（Shift 等比、Alt 自由拉角做透视）、拖边单轴缩放（Shift 斜切）、拖上方圆柄旋转、拖框内移动。回车确认，Esc 取消。</p>
         </section>
 
         <!-- 文字 -->
@@ -197,6 +217,136 @@
           <p class="desc">框住要保留的主体，工具会把框外的背景去掉，生成透明底图片。框要把主体完整包住、尽量贴边，结果更准。</p>
           <button id="btnCutMode" class="block-btn primary">框选抠图</button>
           <p class="hint">进入后在图片上拖出选框，点「确认」开始抠图（大图会慢一点）。</p>
+          <div class="group-title">一键换背景</div>
+          <p class="desc">抠好图（或活动图层本身已有透明区域）后，点一个背景：主体会被合成到背景层之上，一步可撤销。</p>
+          <div id="bgGrid" class="btn-grid"></div>
+        </section>
+
+        <!-- 图层 -->
+        <section class="page" data-page="layers">
+          <label class="field layer-field">混合模式
+            <select id="layerBlend"></select>
+          </label>
+          <div class="slider-row layer-opacity-row">
+            <div class="sr-head">
+              <label for="layerOpacity">不透明度</label>
+              <span class="sr-val" id="layerOpacityVal">100%</span>
+            </div>
+            <input type="range" id="layerOpacity" min="0" max="100" step="1" value="100" aria-label="图层不透明度">
+          </div>
+          <div id="layerList" class="layer-list"></div>
+          <div class="btn-grid layer-btns">
+            <button id="btnLayerAdd" class="cell-btn">新建</button>
+            <button id="btnLayerDup" class="cell-btn">复制</button>
+            <button id="btnLayerDel" class="cell-btn">删除</button>
+            <button id="btnLayerUp" class="cell-btn">上移</button>
+            <button id="btnLayerDown" class="cell-btn">下移</button>
+            <button id="btnLayerMerge" class="cell-btn">向下合并</button>
+            <button id="btnLayerFlatten" class="cell-btn">拼合</button>
+            <button id="btnLayerAdj" class="cell-btn">新建调整图层</button>
+            <button id="btnLayerStyle" class="cell-btn">图层样式</button>
+          </div>
+          <p class="hint">点图层切换要编辑的层；双击名称可改名。调节、曲线、滤镜都只作用于当前层。调整图层没有像素，它的调节/曲线/高级调整会作用到它下面的所有层。</p>
+          <div class="group-title">图层蒙版</div>
+          <div class="btn-grid">
+            <button id="btnMaskWhite" class="cell-btn">添加蒙版（白）</button>
+            <button id="btnMaskBlack" class="cell-btn">添加蒙版（黑）</button>
+            <button id="btnMaskSel" class="cell-btn">从选区添加</button>
+            <button id="btnMaskInvert" class="cell-btn">反相蒙版</button>
+            <button id="btnMaskToggle" class="cell-btn">停用/启用蒙版</button>
+            <button id="btnMaskDel" class="cell-btn">删除蒙版</button>
+          </div>
+          <p class="hint">蒙版：白色=显示、黑色=隐藏、灰色=半透明。点列表里的蒙版缩略图可选中蒙版，「反相/停用/删除」对选中蒙版生效（未选中时对当前层生效）。</p>
+        </section>
+
+        <!-- 选区 -->
+        <section class="page" data-page="select">
+          <div class="group-title">选区工具</div>
+          <div class="btn-grid" id="selTools">
+            <button class="cell-btn sel-tool active" data-seltool="rect">矩形选区</button>
+            <button class="cell-btn sel-tool" data-seltool="ellipse">椭圆选区</button>
+            <button class="cell-btn sel-tool" data-seltool="lasso">套索</button>
+            <button class="cell-btn sel-tool" data-seltool="wand">魔棒</button>
+          </div>
+          <div id="wandTolBox"></div>
+          <label class="check-row"><input id="chkWandContig" type="checkbox" checked> 魔棒只选连通区域（取消则全图同色都选）</label>
+          <p class="hint">矩形/椭圆：在图上拖拽；套索：拖出一条闭合轨迹；魔棒：在图上点一下，选颜色相近的区域。</p>
+          <div class="group-title">选区操作</div>
+          <div class="btn-grid">
+            <button id="btnSelAll" class="cell-btn">全选</button>
+            <button id="btnSelInvert" class="cell-btn">反选</button>
+            <button id="btnSelNone" class="cell-btn">取消选区</button>
+            <button id="btnSelFeather" class="cell-btn">羽化</button>
+          </div>
+          <div id="selFeatherBox"></div>
+          <div class="size-row">
+            <label>扩展/收缩 <input id="inSelMorph" type="number" min="1" max="500" value="5" inputmode="numeric"></label>
+          </div>
+          <div class="btn-grid">
+            <button id="btnSelExpand" class="cell-btn">扩展</button>
+            <button id="btnSelContract" class="cell-btn">收缩</button>
+          </div>
+          <div class="group-title">选区内容（当前图层）</div>
+          <div class="btn-grid">
+            <button id="btnSelDelete" class="cell-btn">删除内容</button>
+            <button id="btnSelFill" class="cell-btn">填充颜色</button>
+          </div>
+          <label class="field">填充色
+            <input id="inSelFillColor" type="color" value="#ff5252">
+          </label>
+          <p class="hint" id="selStat">无选区</p>
+          <p class="hint">有选区时，调节、曲线、调整项和滤镜只作用于当前图层的选区内。选区本身不进撤销栈（和 Photoshop 一样），但受选区影响的编辑可以撤销。</p>
+        </section>
+
+        <!-- 画笔 -->
+        <section class="page" data-page="brush">
+          <div class="group-title">画笔工具</div>
+          <div class="btn-grid" id="brushTools"></div>
+          <div id="brushSliders"></div>
+          <label class="field" id="brushColorField">颜色
+            <input id="inBrushColor" type="color" value="#e53935">
+          </label>
+          <p class="hint" id="brushTargetHint">在图上拖动即可画。一笔算一步撤销。</p>
+          <div class="group-title">形状</div>
+          <div class="btn-grid" id="shapeTools"></div>
+          <div id="shapeSliders"></div>
+          <label class="check-row"><input id="chkShapeFill" type="checkbox" checked> 填充</label>
+          <label class="field">填充色
+            <input id="inShapeFill" type="color" value="#4da3ff">
+          </label>
+          <label class="check-row"><input id="chkShapeGrad" type="checkbox"> 渐变填充（沿拖拽方向）</label>
+          <label class="field">渐变末色
+            <input id="inShapeGrad2" type="color" value="#ff8a65">
+          </label>
+          <label class="check-row"><input id="chkShapeStroke" type="checkbox" checked> 描边</label>
+          <label class="field">描边色
+            <input id="inShapeStroke" type="color" value="#212121">
+          </label>
+          <div id="shapeStrokeBox"></div>
+          <p class="hint">形状：在图上拖出范围，松手落到当前图层（一步撤销）。直线用描边色和描边宽。</p>
+        </section>
+
+        <!-- 历史 -->
+        <section class="page" data-page="history">
+          <div id="historyList" class="history-list"></div>
+          <p class="hint">点任意一步跳回当时的状态；在旧状态上做新操作会截断后面的分支（与撤销栈一致，最多保留最近 12 步）。</p>
+        </section>
+
+        <!-- 智能：一句话修图 -->
+        <section class="page" data-page="smart">
+          <p class="desc">用一句话说想怎么改，例如「让天空更蓝」「照片太暗了」「背景虚化，人物亮一点」。全部在本机解析执行，不联网。</p>
+          <textarea id="nlInput" rows="3" placeholder="例如：让天空更蓝，人像亮一点，背景虚化"></textarea>
+          <button id="btnNLGo" class="block-btn primary">执行修图</button>
+          <div class="group-title">我理解为</div>
+          <div id="nlRead" class="nl-read"><p class="hint">输入后这里会先列出我理解的动作，点「执行修图」才真正改图。</p></div>
+          <div class="group-title">修图配方</div>
+          <p class="desc">把当前各图层的编辑状态（不含图片本身）存成配方文件，之后一键套到别的照片上，或批量套到一批照片。</p>
+          <div class="btn-grid">
+            <button id="btnRecipeSave" class="cell-btn">保存配方</button>
+            <button id="btnRecipeApply" class="cell-btn">应用配方</button>
+          </div>
+          <button id="btnRecipeBatch" class="block-btn">批量套用配方到多张图</button>
+          <p class="hint" id="recipeInfo">批量套用只支持单层配方；会逐张导出加了「-配方」后缀的 PNG。</p>
         </section>
       </div>
 
@@ -214,6 +364,9 @@
           <svg viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M4 17.5v2a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19.5v-2"/></svg>
           <span>导出下载</span>
         </button>
+        <button id="btnExportDlg" class="tbtn">
+          <span>导出…</span>
+        </button>
       </div>
     </aside>
   </div>
@@ -224,6 +377,66 @@
     <a href="java.html" style="color:#8a94a6;text-decoration:none;white-space:nowrap" title="在浏览器里运行 Java 原版（加载较慢）">Java 原版</a>
     <span id="sizeInfo"></span>
   </footer>
+</div>
+
+<!-- 滤镜参数对话框（滑杆由滤镜的 params 元数据自动生成） -->
+<div id="filterDlg" hidden>
+  <div class="cf-card fd-card">
+    <p class="cf-title" id="filterDlgTitle">滤镜参数</p>
+    <div id="filterDlgSliders"></div>
+    <div class="cf-btns">
+      <button id="fdCancel" class="mini-btn">取消</button>
+      <button id="fdApply" class="mini-btn ok">应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 图层样式对话框（效果与参数行由 MTStyles.DEFS 数据驱动生成） -->
+<div id="styleDlg" hidden>
+  <div class="cf-card sd-card">
+    <p class="cf-title">图层样式</p>
+    <div id="styleDlgBody"></div>
+    <div class="cf-btns">
+      <button id="sdClear" class="mini-btn">清除全部</button>
+      <button id="sdCancel" class="mini-btn">取消</button>
+      <button id="sdApply" class="mini-btn ok">应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导出对话框（格式/质量/缩放/文件名/体积预估；构成参考 PhotoCraft Export As） -->
+<div id="exportDlg" hidden>
+  <div class="cf-card ed-card">
+    <p class="cf-title">导出</p>
+    <label class="field">格式
+      <select id="expFormat">
+        <option value="png">PNG</option>
+        <option value="jpeg">JPEG</option>
+        <option value="webp">WebP</option>
+      </select>
+    </label>
+    <label id="expQualityRow">质量 <input id="expQuality" type="range" min="10" max="100" value="92"><span id="expQualityVal">92</span></label>
+    <label class="field">尺寸
+      <select id="expScale">
+        <option value="1">原尺寸 100%</option>
+        <option value="0.5">50%</option>
+        <option value="0.25">25%</option>
+        <option value="width">指定宽度</option>
+      </select>
+    </label>
+    <label class="field" id="expWidthRow" hidden>宽度（px）
+      <input id="expWidth" type="number" min="1" inputmode="numeric">
+    </label>
+    <p class="hint" id="expSizeInfo"></p>
+    <label class="field">文件名
+      <input id="expName" type="text">
+    </label>
+    <p class="hint" id="expEstimate">预估体积：—</p>
+    <div class="cf-btns">
+      <button id="expCancel" class="mini-btn">取消</button>
+      <button id="expOk" class="mini-btn ok">导出</button>
+    </div>
+  </div>
 </div>
 
 <!-- 放弃未导出修改的确认框 -->
@@ -238,10 +451,22 @@
   </div>
 </div>
 
-<input id="fileInput" type="file" accept="image/*" hidden>
+<input id="fileInput" type="file" accept="image/*,.meowtu" hidden>
+<input id="cubeInput" type="file" accept=".cube" hidden>
+<input id="recipeInput" type="file" accept=".meowtu-recipe,application/json" hidden>
+<input id="batchInput" type="file" accept="image/*" multiple hidden>
 
 <script src="js/filters.js"></script>
+<script src="js/lut.js"></script>
+<script src="js/adjust.js"></script>
 <script src="js/grabcut.js"></script>
+<script src="js/selection.js"></script>
+<script src="js/brush.js"></script>
+<script src="js/styles.js"></script>
+<script src="js/transform.js"></script>
+<script src="js/masks.js"></script>
+<script src="js/nl.js"></script>
+<script src="js/nledit.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/app.js"></script>
 </body>

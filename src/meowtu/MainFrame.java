@@ -79,7 +79,19 @@ public class MainFrame extends JFrame {
 
     private void loadWindowIcon() {
         try (InputStream in = getClass().getResourceAsStream("/meowtu-logo-final.png")) {
-            if (in != null) setIconImage(ImageIO.read(in));
+            if (in == null) return;
+            BufferedImage img = ImageIO.read(in);
+            if (img == null) return;
+            // 原图非正方形，直接设图标会被系统在方形图标位挤压：先居中贴到正方形透明画布
+            int side = Math.max(img.getWidth(), img.getHeight());
+            if (side != img.getWidth() || side != img.getHeight()) {
+                BufferedImage sq = new BufferedImage(side, side, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g = sq.createGraphics();
+                g.drawImage(img, (side - img.getWidth()) / 2, (side - img.getHeight()) / 2, null);
+                g.dispose();
+                img = sq;
+            }
+            setIconImage(img);
         } catch (Exception ignored) { /* 无图标不影响使用 */ }
     }
 

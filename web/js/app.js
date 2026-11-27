@@ -29,6 +29,12 @@ function hasImg() {
   try { return !!(editor && editor.hasImage && editor.hasImage()); }
   catch (e) { return false; }
 }
+/* 当前活动层是否为调整图层（无像素，抠图/删除/填充等像素操作要给提示） */
+function activeIsAdj() {
+  const metas = (lastState && lastState.layers) || [];
+  const m = metas[lastState ? lastState.activeLayer : -1];
+  return !!(m && m.kind === 'adj');
+}
 function imgSize() {
   if (!editor || !editor.getSize) return null;
   try {
@@ -39,6 +45,24 @@ function imgSize() {
     return (w && h) ? { w: w, h: h } : null;
   } catch (e) { return null; }
 }
+/* 显示尺寸确定性适配：CSS 百分比约束存在参照循环，旋转交换宽高后会溢出舞台；
+   改为按舞台可用区（扣 padding）与画布宽高比算显式 px 尺寸，wrap 随画布尺寸走。
+   不放大（k≤1），与旧行为一致。坐标换算都走 getBoundingClientRect 比例，不受影响。 */
+function fitDisplay() {
+  if (!hasImg() || !editorCanvas.width || !editorCanvas.height) {
+    editorCanvas.style.width = ''; editorCanvas.style.height = '';
+    return;
+  }
+  const cs = getComputedStyle(stage);
+  const aw = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const ah = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  if (aw <= 0 || ah <= 0) return;
+  const k = Math.min(1, aw / editorCanvas.width, ah / editorCanvas.height);
+  editorCanvas.style.width = Math.max(1, Math.floor(editorCanvas.width * k)) + 'px';
+  editorCanvas.style.height = Math.max(1, Math.floor(editorCanvas.height * k)) + 'px';
+}
+window.addEventListener('resize', fitDisplay);
+
 /* 安全调用引擎方法（支持同步/异步），失败时提示 */
 async function call(fn, failMsg) {
   if (!editor) { setStatus('编辑引擎未就绪'); return false; }
@@ -61,6 +85,10 @@ let exportedCounter = 0;
 function bumpChange() { changeCounter++; }
 function hasPendingEdits() {
   if (texts.length > 0) return true;
+  try {
+    if (editor && editor.getAdj && editor.getAdj()) return true;
+    if (editor && editor.getFilter && editor.getFilter()) return true;
+  } catch (e) { /* 忽略 */ }
   for (const k in sliderEls) if (parseFloat(sliderEls[k].input.value) !== 0) return true;
   for (const ch of ['rgb', 'r', 'g', 'b']) {
     const p = curveState.points[ch];
@@ -134,9 +162,10 @@ function afterOp(label) {
   setTimeout(() => { refresh(); }, 80);
 }
 
-/* ---------------- 打开图片：选文件 / 拖拽 / 粘贴 ---------------- */
+/* ---------------- 打开图片 / 工程：选文件 / 拖拽 / 粘贴 ---------------- */
 async function loadFile(file) {
   if (!editor || !file) return;
+  if (/\.meowtu$/i.test(file.name || '')) { loadProjectFile(file); return; }
   if (file.type && !file.type.startsWith('image/')) { setStatus('这不是图片文件'); return; }
   if (isDirty() && !await confirmDiscard()) { setStatus('已取消打开'); return; }
   setStatus('正在打开 ' + (file.name || '图片') + '…');
@@ -145,6 +174,24 @@ async function loadFile(file) {
     try { setOrig(URL.createObjectURL(file)); } catch (e) { snapshotFromCanvas(); }
     setStatus('已打开 ' + (file.name || '图片'));
     exitSelectMode();
+    exportedCounter = changeCounter;
+    syncUIFromEngine();
+    refresh();
+  }
+}
+/* 打开 .meowtu 工程：解析 JSON → 引擎校验恢复（一步可撤销）；
+   文件损坏/版本不符时引擎给中文错误，当前文档不受影响。 */
+async function loadProjectFile(file) {
+  if (isDirty() && !await confirmDiscard()) { setStatus('已取消打开'); return; }
+  setStatus('正在打开工程 ' + (file.name || '') + '…');
+  let proj = null;
+  try { proj = JSON.parse(await file.text()); }
+  catch (e) { setStatus('打开工程失败：文件已损坏，不是有效的工程文件'); return; }
+  const ok = await call(() => editor.importProject(proj), '打开工程失败');
+  if (ok) {
+    setStatus('已打开工程 ' + (file.name || ''));
+    exitSelectMode();
+    snapshotFromCanvas();
     exportedCounter = changeCounter;
     syncUIFromEngine();
     refresh();
@@ -198,6 +245,7 @@ function refresh(state) {
   const has = hasImg();
   $('#dropzone').hidden = has;
   wrap.style.visibility = has ? 'visible' : 'hidden';
+  fitDisplay();
   // 无 state 的刷新（afterOp 的延迟刷新）沿用最近一次引擎状态，
   // 否则会把重做按钮误置为禁用（引擎状态事件才是准绳）
   const st = state || lastState;
@@ -227,6 +275,33 @@ function refresh(state) {
   }
   clearTimeout(histTimer);
   histTimer = setTimeout(drawHist, 160);
+  updateBrushTargetHint();
+  renderHistory();
+}
+/* 历史面板：条目来自引擎状态的 history（标签在各操作入栈时收集）；
+   当前步高亮、未来步（可重做）置灰，点任意步 = historyGoTo 跳转。 */
+function renderHistory() {
+  const box = $('#historyList');
+  if (!box) return;
+  const hist = lastState && lastState.history;
+  box.innerHTML = '';
+  if (!hist || !hist.labels.length) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = '还没有打开图片';
+    box.appendChild(p);
+    return;
+  }
+  hist.labels.forEach((label, i) => {
+    const row = document.createElement('button');
+    row.className = 'history-row' + (i === hist.index ? ' active' : (i > hist.index ? ' future' : ''));
+    row.textContent = (i + 1) + '. ' + label;
+    row.addEventListener('click', async () => {
+      if (i === hist.index || !editor) return;
+      if (await call(() => editor.historyGoTo(i), '跳转历史失败')) afterOp('已跳到「' + label + '」');
+    });
+    box.appendChild(row);
+  });
 }
 if (editor && typeof editor.on === 'function') {
   try { editor.on('state', s => { lastState = s; refresh(s); }); } catch (e) { /* 忽略 */ }
@@ -239,7 +314,9 @@ function switchTab(name) {
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   $$('.page').forEach(p => p.classList.toggle('active', p.dataset.page === name));
   if (name === 'text') setMode('text');
-  else if (mode === 'text') setMode('browse');
+  else if (name === 'select') setMode('select');
+  else if (name === 'brush') setMode('brush');
+  else if (mode === 'text' || mode === 'select' || mode === 'brush') setMode('browse');
   if (name === 'adjust') { drawCurve(); drawHist(); }
 }
 $$('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
@@ -259,7 +336,7 @@ $('#btnUndo').addEventListener('click', async () => { if (await call(() => edito
 $('#btnRedo').addEventListener('click', async () => { if (await call(() => editor.redo(), '重做失败')) afterOp('已重做'); });
 
 /* ---------------- 选框模式（裁剪 / 抠图共用）与文字拖动 ---------------- */
-let mode = 'browse';           // browse | crop | cutout | text | persp
+let mode = 'browse';           // browse | crop | cutout | text | persp | select
 let selection = null;          // 原图坐标 {x,y,w,h}
 let perspQuad = null;          // 透视四角（原图坐标）[左上,右上,右下,左下]
 let dragInfo = null;           // 拖动过程状态
@@ -267,7 +344,7 @@ let dragInfo = null;           // 拖动过程状态
 function setMode(m) {
   mode = m;
   overlay.style.pointerEvents = (m === 'browse') ? 'none' : 'auto';
-  overlay.style.cursor = (m === 'crop' || m === 'cutout') ? 'crosshair' : (m === 'persp' ? 'move' : 'default');
+  overlay.style.cursor = (m === 'crop' || m === 'cutout' || m === 'select' || m === 'brush') ? 'crosshair' : (m === 'persp' ? 'move' : 'default');
 }
 setMode('browse');
 
@@ -297,13 +374,18 @@ function enterPerspectiveMode() {
   setStatus('透视矫正：拖动四个角点，点确认拉直');
 }
 function exitSelectMode() {
+  if (mode === 'transform') { exitTransform(false); return; }
   if (mode === 'crop' || mode === 'cutout' || mode === 'persp') setMode(currentTab === 'text' ? 'text' : 'browse');
   selection = null; perspQuad = null; dragInfo = null;
   $('#selBar').hidden = true;
   clearOverlay();
 }
-$('#selCancel').addEventListener('click', () => { exitSelectMode(); setStatus('已取消'); });
+$('#selCancel').addEventListener('click', () => {
+  if (mode === 'transform') { exitTransform(false); setStatus('已取消自由变换'); return; }
+  exitSelectMode(); setStatus('已取消');
+});
 $('#selOk').addEventListener('click', () => {
+  if (mode === 'transform') { exitTransform(true); return; }
   if (mode === 'persp') {
     if (!perspQuad) return;
     // 四边形不能自交：相邻边叉积必须同号（凸四边形）
@@ -337,6 +419,179 @@ function runPerspective(quad) {
     $('#busy').hidden = true;
     if (ok) afterOp('透视矫正完成');
   }, 60);
+}
+
+/* ---------------- 自由变换（只变换活动像素层；预览走引擎预览合成，
+   提交才按 MTTransform 全分辨率烘焙，一步撤销） ----------------
+   手柄口径：角点拖动 = 缩放（保持平行四边形的仿射解，锚点为对角；
+   Shift = 等比；Alt = 四角自由，即透视/扭曲）；边点拖动 = 沿法线单轴缩放，
+   Shift+边点 = 沿切线斜切；上方圆柄（或框外）拖动 = 旋转；框内拖动 = 平移。
+   PhotoCraft 的 Free Transform 同样以四角 quad 统摄这些模式（transform.rs）。 */
+let tfQuad = null;        // 当前四角（原图坐标）[左上,右上,右下,左下]
+let tfDrag = null;        // {kind:'corner'|'edge'|'rotate'|'move', idx, start, orig, center}
+let tfPvPending = false;
+const TF_IJ = [[0, 0], [1, 0], [1, 1], [0, 1]];
+const vSub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+const vAdd = (a, b) => ({ x: a.x + b.x, y: a.y + b.y });
+
+function enterTransformMode() {
+  if (!hasImg()) { setStatus('先打开一张图片'); return; }
+  if (activeIsAdj()) { setStatus('当前是调整图层，没有像素可以变换，请先切换到像素图层'); return; }
+  const s = imgSize();
+  if (!s) return;
+  setMode('transform');
+  selection = null; perspQuad = null;
+  tfQuad = [{ x: 0, y: 0 }, { x: s.w, y: 0 }, { x: s.w, y: s.h }, { x: 0, y: s.h }];
+  tfDrag = null;
+  $('#selHint').textContent = '自由变换（当前图层）';
+  $('#selBar').hidden = false;
+  editor.setTransformPreview(tfQuad);
+  sizeOverlay(); drawOverlay(); updateTfInfo();
+  setStatus('自由变换：拖角缩放、拖边单轴、拖圆柄旋转，回车确认 / Esc 取消');
+}
+function exitTransform(commit) {
+  const q = tfQuad;
+  tfQuad = null; tfDrag = null;
+  if (mode === 'transform') setMode(currentTab === 'text' ? 'text' : 'browse');
+  $('#selBar').hidden = true;
+  clearOverlay();
+  if (!editor) return;
+  editor.setTransformPreview(null);
+  if (!commit || !q) { refresh(); return; }
+  const s = imgSize();
+  const same = s && q.every((p, i) => Math.abs(p.x - [0, s.w, s.w, 0][i]) < 0.01 && Math.abs(p.y - [0, 0, s.h, s.h][i]) < 0.01);
+  if (same) { refresh(); setStatus('变换没有变化，已取消'); return; }
+  call(() => editor.transformLayer(q), '自由变换失败').then(ok => { if (ok) afterOp('自由变换已应用'); });
+}
+function tfClampP(p) {
+  const s = imgSize() || { w: 1, h: 1 };
+  return { x: Math.max(-s.w, Math.min(2 * s.w, p.x)), y: Math.max(-s.h, Math.min(2 * s.h, p.y)) };
+}
+function tfCenterOf(q) { return { x: (q[0].x + q[2].x) / 2, y: (q[0].y + q[2].y) / 2 }; }
+function tfIsPara(q) {
+  return Math.abs(q[0].x + q[2].x - q[1].x - q[3].x) < 0.01 && Math.abs(q[0].y + q[2].y - q[1].y - q[3].y) < 0.01;
+}
+/** 在 (U,V) 基下解 a·U + b·V = rhs（角点仿射缩放用）。 */
+function tfSolve(U, V, rhs) {
+  const det = U.x * V.y - U.y * V.x;
+  if (Math.abs(det) < 1e-9) return null;
+  return { a: (rhs.x * V.y - rhs.y * V.x) / det, b: (U.x * rhs.y - U.y * rhs.x) / det };
+}
+function tfDragCorner(idx, P, shift, alt) {
+  const q = tfDrag.orig;
+  if (alt || !tfIsPara(q)) { const nq = q.map(p => ({ ...p })); nq[idx] = P; return nq; }
+  const [i, j] = TF_IJ[idx];
+  const U = vSub(q[1], q[0]), V = vSub(q[3], q[0]);
+  const A = q[(idx + 2) % 4];
+  const sU = { x: (2 * i - 1) * U.x, y: (2 * i - 1) * U.y };
+  const sV = { x: (2 * j - 1) * V.x, y: (2 * j - 1) * V.y };
+  let a, b;
+  if (shift) {
+    const D = vAdd(sU, sV), den = D.x * D.x + D.y * D.y;
+    const s = den ? ((P.x - A.x) * D.x + (P.y - A.y) * D.y) / den : 1;
+    a = s; b = s;
+  } else {
+    const sol = tfSolve(sU, sV, vSub(P, A));
+    if (!sol) return q;
+    a = sol.a; b = sol.b;
+  }
+  const U2 = { x: U.x * a, y: U.y * a }, V2 = { x: V.x * b, y: V.y * b };
+  const O2 = { x: A.x - (1 - i) * U2.x - (1 - j) * V2.x, y: A.y - (1 - i) * U2.y - (1 - j) * V2.y };
+  return [O2, vAdd(O2, U2), vAdd(vAdd(O2, U2), V2), vAdd(O2, V2)];
+}
+function tfDragEdge(idx, P, shift) {
+  const q = tfDrag.orig;
+  const d = vSub(P, tfDrag.start);
+  const U = vSub(q[1], q[0]), V = vSub(q[3], q[0]);
+  const basis = (idx === 0 || idx === 2) ? (shift ? U : V) : (shift ? V : U);
+  const den = basis.x * basis.x + basis.y * basis.y;
+  if (!den) return q;
+  const t = (d.x * basis.x + d.y * basis.y) / den;
+  const delta = { x: basis.x * t, y: basis.y * t };
+  const nq = q.map(p => ({ ...p }));
+  const ab = [[0, 1], [1, 2], [2, 3], [3, 0]][idx];
+  nq[ab[0]] = vAdd(nq[ab[0]], delta);
+  nq[ab[1]] = vAdd(nq[ab[1]], delta);
+  return nq;
+}
+function tfDragRotate(P) {
+  const c = tfDrag.center;
+  const da = Math.atan2(P.y - c.y, P.x - c.x) - Math.atan2(tfDrag.start.y - c.y, tfDrag.start.x - c.x);
+  const cos = Math.cos(da), sin = Math.sin(da);
+  return tfDrag.orig.map(p => ({
+    x: c.x + (p.x - c.x) * cos - (p.y - c.y) * sin,
+    y: c.y + (p.x - c.x) * sin + (p.y - c.y) * cos
+  }));
+}
+/** 旋转柄位置（原图坐标）：上边中点沿外法线方向外推 28 显示 px。 */
+function tfRotateHandlePos(q) {
+  const s = imgSize();
+  const cr = editorCanvas.getBoundingClientRect();
+  const disp = s && cr.width ? cr.width / s.w : 1;
+  const mid = { x: (q[0].x + q[1].x) / 2, y: (q[0].y + q[1].y) / 2 };
+  const U = vSub(q[1], q[0]);
+  let n = { x: -U.y, y: U.x };
+  const len = Math.hypot(n.x, n.y) || 1;
+  n = { x: n.x / len, y: n.y / len };
+  const c = tfCenterOf(q);
+  if ((mid.x - c.x) * n.x + (mid.y - c.y) * n.y < 0) n = { x: -n.x, y: -n.y };
+  return { x: mid.x + n.x * 28 / disp, y: mid.y + n.y * 28 / disp };
+}
+function tfUpdateFromDrag(e) {
+  const P = tfClampP(toImage(e));
+  if (tfDrag.kind === 'corner') tfQuad = tfDragCorner(tfDrag.idx, P, e.shiftKey, e.altKey);
+  else if (tfDrag.kind === 'edge') tfQuad = tfDragEdge(tfDrag.idx, P, e.shiftKey);
+  else if (tfDrag.kind === 'rotate') tfQuad = tfDragRotate(P);
+  else if (tfDrag.kind === 'move') {
+    const d = vSub(P, tfDrag.start);
+    tfQuad = tfDrag.orig.map(p => vAdd(p, d));
+  }
+  if (!tfPvPending) {
+    tfPvPending = true;
+    requestAnimationFrame(() => {
+      tfPvPending = false;
+      if (tfQuad && mode === 'transform' && editor) editor.setTransformPreview(tfQuad);
+    });
+  }
+  drawOverlay();
+  updateTfInfo();
+}
+function updateTfInfo() {
+  if (!tfQuad) return;
+  const q = tfQuad;
+  const w = (Math.hypot(q[1].x - q[0].x, q[1].y - q[0].y) + Math.hypot(q[2].x - q[3].x, q[2].y - q[3].y)) / 2;
+  const h = (Math.hypot(q[3].x - q[0].x, q[3].y - q[0].y) + Math.hypot(q[2].x - q[1].x, q[2].y - q[1].y)) / 2;
+  const ang = Math.atan2(q[1].y - q[0].y, q[1].x - q[0].x) * 180 / Math.PI;
+  $('#selInfo').textContent = Math.round(w) + ' × ' + Math.round(h) + ' · ' + ang.toFixed(1) + '°';
+}
+function drawTransformBox(ctx, ox, oy, sx, sy, dpr) {
+  const X = v => ox + v * sx, Y = v => oy + v * sy;
+  const pts = tfQuad.map(p => ({ x: X(p.x), y: Y(p.y) }));
+  ctx.save();
+  ctx.strokeStyle = '#4da3ff'; ctx.lineWidth = 1.6 * dpr;
+  ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.closePath(); ctx.stroke();
+  const handle = (x, y, r) => {
+    ctx.beginPath(); ctx.rect(x - r, y - r, r * 2, r * 2);
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#4da3ff'; ctx.lineWidth = 1.6 * dpr; ctx.stroke();
+  };
+  const hr = (window.matchMedia && window.matchMedia('(pointer:coarse)').matches) ? 9 : 6;
+  for (let i = 0; i < 4; i++) {
+    const a = pts[i], b = pts[(i + 1) % 4];
+    handle((a.x + b.x) / 2, (a.y + b.y) / 2, hr * 0.8 * dpr);
+  }
+  pts.forEach(p => handle(p.x, p.y, hr * dpr));
+  const hp = tfRotateHandlePos(tfQuad);
+  const hx = X(hp.x), hy = Y(hp.y);
+  const topMid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+  ctx.beginPath(); ctx.moveTo(topMid.x, topMid.y); ctx.lineTo(hx, hy);
+  ctx.strokeStyle = '#4da3ff'; ctx.stroke();
+  ctx.beginPath(); ctx.arc(hx, hy, hr * dpr, 0, Math.PI * 2);
+  ctx.fillStyle = '#4da3ff'; ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.stroke();
+  ctx.restore();
 }
 
 /* 画布坐标换算：事件坐标 <-> 原图坐标。
@@ -375,6 +630,75 @@ function clearOverlay() {
   const ctx = overlay.getContext('2d');
   ctx.clearRect(0, 0, overlay.width, overlay.height);
 }
+
+/* ---------------- 选区蚂蚁线 + 拖拽草稿（选区状态在引擎里，这里只负责画） ---------------- */
+let selDraft = null;      // {tool:'rect'|'ellipse', x0,y0,x1,y1} | {tool:'lasso', pts:[[x,y],...]}（原图坐标）
+let antsCache = { key: '', pts: [] };
+let antsPhase = 0, antsTimer = null;
+function selOutlinePts() {
+  if (!editor || typeof editor.selGetMaskAt !== 'function' || !editorCanvas.width) return [];
+  const st = lastState && lastState.selection;
+  if (!st || !st.active) return [];
+  const w = editorCanvas.width, h = editorCanvas.height;
+  const key = st.rev + ':' + w + 'x' + h;
+  if (antsCache.key === key) return antsCache.pts;
+  const m = editor.selGetMaskAt(w, h);
+  const pts = [];
+  if (m) {
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (m[y * w + x] <= 127) continue;
+      const inner = x > 0 && m[y * w + x - 1] > 127 && x < w - 1 && m[y * w + x + 1] > 127 &&
+                    y > 0 && m[(y - 1) * w + x] > 127 && y < h - 1 && m[(y + 1) * w + x] > 127;
+      if (!inner) pts.push(x, y);
+    }
+  }
+  antsCache = { key, pts };
+  return pts;
+}
+function drawSelAnts(ctx, ox, oy, sx, sy, sz) {
+  const pts = selOutlinePts();
+  if (!pts.length) {
+    if (antsTimer) { clearInterval(antsTimer); antsTimer = null; }
+    return;
+  }
+  const psx = sx * sz.w / editorCanvas.width, psy = sy * sz.h / editorCanvas.height;
+  ctx.fillStyle = antsPhase ? '#101010' : '#ffffff';
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i += 2) {
+    ctx.rect(ox + pts[i] * psx, oy + pts[i + 1] * psy, Math.max(1, psx), Math.max(1, psy));
+  }
+  ctx.fill();
+  if (!antsTimer) {
+    antsTimer = setInterval(() => { antsPhase ^= 1; drawOverlay(); }, 450);
+  }
+}
+function drawSelDraft(ctx, ox, oy, sx, sy, dpr) {
+  if (!selDraft) return;
+  const X = v => ox + v * sx, Y = v => oy + v * sy;
+  ctx.save();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.6 * dpr;
+  ctx.setLineDash([6 * dpr, 4 * dpr]);
+  ctx.beginPath();
+  if (selDraft.tool === 'lasso') {
+    const pts = selDraft.pts;
+    if (pts.length) {
+      ctx.moveTo(X(pts[0][0]), Y(pts[0][1]));
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(X(pts[i][0]), Y(pts[i][1]));
+      ctx.closePath();
+    }
+  } else {
+    const x0 = Math.min(selDraft.x0, selDraft.x1), x1 = Math.max(selDraft.x0, selDraft.x1);
+    const y0 = Math.min(selDraft.y0, selDraft.y1), y1 = Math.max(selDraft.y0, selDraft.y1);
+    if (selDraft.tool === 'ellipse') {
+      if (x1 > x0 && y1 > y0) ctx.ellipse(X((x0 + x1) / 2), Y((y0 + y1) / 2), (x1 - x0) * sx / 2, (y1 - y0) * sy / 2, 0, 0, Math.PI * 2);
+    } else {
+      ctx.rect(X(x0), Y(y0), Math.max(0, (x1 - x0) * sx), Math.max(0, (y1 - y0) * sy));
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+}
 function drawOverlay() {
   const ctx = overlay.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
@@ -385,6 +709,10 @@ function drawOverlay() {
   const cr = editorCanvas.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
   const ox = (cr.left - wr.left) * dpr, oy = (cr.top - wr.top) * dpr;
   const sx = cr.width / sz.w * dpr, sy = cr.height / sz.h * dpr;
+  drawSelAnts(ctx, ox, oy, sx, sy, sz);
+  drawSelDraft(ctx, ox, oy, sx, sy, dpr);
+  drawBrushOverlay(ctx, ox, oy, sx, sy, dpr);
+  if (mode === 'transform' && tfQuad) { drawTransformBox(ctx, ox, oy, sx, sy, dpr); return; }
   if (mode === 'persp' && perspQuad) {
     const pts = perspQuad.map(p => ({ x: ox + p.x * sx, y: oy + p.y * sy }));
     ctx.fillStyle = 'rgba(0,0,0,0.48)';
@@ -434,7 +762,67 @@ function drawOverlay() {
 overlay.addEventListener('pointerdown', e => {
   if (!hasImg()) return;
   const p = toImage(e);
-  if (mode === 'crop' || mode === 'cutout') {
+  if (mode === 'brush') {
+    brushHover = p;
+    if (paintToolIsShape()) {
+      shapeDrag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+      overlay.setPointerCapture(e.pointerId);
+      drawOverlay();
+    } else {
+      startStroke(p, e);
+    }
+  } else if (mode === 'select') {
+    if (selTool === 'wand') {
+      const sz = imgSize();
+      const px = Math.max(0, Math.min(sz.w - 1, Math.floor(p.x)));
+      const py = Math.max(0, Math.min(sz.h - 1, Math.floor(p.y)));
+      call(() => editor.selWand(px, py, wandTol, $('#chkWandContig').checked), '魔棒失败')
+        .then(ok => { if (ok) setStatus('魔棒选区已生成'); });
+    } else if (selTool === 'lasso') {
+      dragInfo = { kind: 'lasso' };
+      selDraft = { tool: 'lasso', pts: [[p.x, p.y]] };
+      overlay.setPointerCapture(e.pointerId);
+      drawOverlay();
+    } else {
+      dragInfo = { kind: 'seldrag' };
+      selDraft = { tool: selTool, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+      overlay.setPointerCapture(e.pointerId);
+      drawOverlay();
+    }
+  } else if (mode === 'transform' && tfQuad) {
+    // 命中判定在显示像素空间做（圆柄→角点→边点→框内平移）
+    const cr = editorCanvas.getBoundingClientRect();
+    const sz = imgSize();
+    if (!sz) return;
+    const toClient = q => ({ x: cr.left + q.x / sz.w * cr.width, y: cr.top + q.y / sz.h * cr.height });
+    const tol = e.pointerType === 'touch' ? 32 : 20;
+    const hp = toClient(tfRotateHandlePos(tfQuad));
+    let kind = null, idx = -1;
+    if (Math.hypot(hp.x - e.clientX, hp.y - e.clientY) < tol) kind = 'rotate';
+    if (!kind) tfQuad.forEach((q, i) => {
+      const c = toClient(q);
+      if (Math.hypot(c.x - e.clientX, c.y - e.clientY) < tol) { kind = 'corner'; idx = i; }
+    });
+    if (!kind) for (let i = 0; i < 4; i++) {
+      const a = toClient(tfQuad[i]), b = toClient(tfQuad[(i + 1) % 4]);
+      if (Math.hypot((a.x + b.x) / 2 - e.clientX, (a.y + b.y) / 2 - e.clientY) < tol) { kind = 'edge'; idx = i; break; }
+    }
+    if (!kind) {
+      // 框内 = 平移（点在四边形内判定：四条边叉积同号）
+      let sign = 0, inside = true;
+      for (let i = 0; i < 4; i++) {
+        const a = tfQuad[i], b = tfQuad[(i + 1) % 4];
+        const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+        const s = cross > 0 ? 1 : -1;
+        if (sign === 0) sign = s; else if (s !== sign) { inside = false; break; }
+      }
+      if (inside) kind = 'move';
+    }
+    if (kind) {
+      tfDrag = { kind, idx, start: p, orig: tfQuad.map(q => ({ ...q })), center: tfCenterOf(tfQuad) };
+      overlay.setPointerCapture(e.pointerId);
+    }
+  } else if (mode === 'crop' || mode === 'cutout') {
     dragInfo = { kind: 'select', ax: p.x, ay: p.y };
     selection = clampSel({ x: p.x, y: p.y, w: 0, h: 0 });
     overlay.setPointerCapture(e.pointerId);
@@ -462,9 +850,24 @@ overlay.addEventListener('pointerdown', e => {
   }
 });
 overlay.addEventListener('pointermove', e => {
+  if (mode === 'transform' && tfDrag) { tfUpdateFromDrag(e); return; }
+  if (mode === 'brush') {
+    const p = toImage(e);
+    brushHover = p;
+    if (strokeCtx) { strokeCtx.stroke.move(p.x, p.y); flushStroke(); }
+    else if (shapeDrag) { shapeDrag.x1 = p.x; shapeDrag.y1 = p.y; }
+    drawOverlay();
+    return;
+  }
   if (!dragInfo) return;
   const p = toImage(e);
-  if (dragInfo.kind === 'select') {
+  if (dragInfo.kind === 'seldrag' && selDraft) {
+    selDraft.x1 = p.x; selDraft.y1 = p.y;
+    drawOverlay();
+  } else if (dragInfo.kind === 'lasso' && selDraft) {
+    const last = selDraft.pts[selDraft.pts.length - 1];
+    if (Math.hypot(p.x - last[0], p.y - last[1]) > 1.5) { selDraft.pts.push([p.x, p.y]); drawOverlay(); }
+  } else if (dragInfo.kind === 'select') {
     selection = clampSel({
       x: Math.min(dragInfo.ax, p.x), y: Math.min(dragInfo.ay, p.y),
       w: Math.abs(p.x - dragInfo.ax), h: Math.abs(p.y - dragInfo.ay)
@@ -479,16 +882,56 @@ overlay.addEventListener('pointermove', e => {
     syncTexts();
   }
 });
-overlay.addEventListener('pointerup', () => { dragInfo = null; });
-overlay.addEventListener('pointercancel', () => { dragInfo = null; });
-new ResizeObserver(() => { sizeOverlay(); if (selection || perspQuad) drawOverlay(); }).observe(wrap);
+overlay.addEventListener('pointerup', () => {
+  if (tfDrag) { tfDrag = null; if (tfQuad && mode === 'transform' && editor) editor.setTransformPreview(tfQuad); }
+  if (strokeCtx) finishStroke();
+  else if (shapeDrag) commitShape();
+  if (dragInfo && (dragInfo.kind === 'seldrag' || dragInfo.kind === 'lasso')) commitSelDraft();
+  dragInfo = null;
+});
+overlay.addEventListener('pointercancel', () => {
+  tfDrag = null;
+  if (strokeCtx) finishStroke();
+  if (shapeDrag) { shapeDrag = null; drawOverlay(); }
+  dragInfo = null;
+  if (selDraft) { selDraft = null; drawOverlay(); }
+});
+new ResizeObserver(() => {
+  sizeOverlay();
+  if (selection || perspQuad || tfQuad || selDraft || (lastState && lastState.selection && lastState.selection.active)) drawOverlay();
+}).observe(wrap);
+overlay.addEventListener('dblclick', () => { if (mode === 'transform') exitTransform(true); });
+$('#btnTransform').addEventListener('click', enterTransformMode);
+
+/* 选区草稿落定：矩形/椭圆按拖拽覆盖的像素范围（[floor(min), floor(max)+1)），套索直接交点列 */
+function commitSelDraft() {
+  const d = selDraft;
+  selDraft = null;
+  if (!d) { drawOverlay(); return; }
+  if (d.tool === 'lasso') {
+    if (d.pts.length >= 3) {
+      call(() => editor.selPolygon(d.pts), '套索失败').then(ok => { if (ok) setStatus('套索选区已生成'); });
+    }
+    drawOverlay();
+    return;
+  }
+  const x0 = Math.floor(Math.min(d.x0, d.x1)), x1 = Math.floor(Math.max(d.x0, d.x1)) + 1;
+  const y0 = Math.floor(Math.min(d.y0, d.y1)), y1 = Math.floor(Math.max(d.y0, d.y1)) + 1;
+  if (x1 - x0 >= 1 && y1 - y0 >= 1) {
+    const fn = d.tool === 'ellipse' ? 'selEllipse' : 'selRect';
+    call(() => editor[fn](x0, y0, x1, y1), '选区失败').then(ok => { if (ok) setStatus('选区已生成'); });
+  }
+  drawOverlay();
+}
 
 /* ---------------- 抠图 ----------------
-   输入取引擎的全分辨率当前效果（不再用降采样预览，否则大图抠完尺寸缩水）；
-   结果经 applyCanvas 作为一步可撤销操作回灌（不再走打开文件、历史不清空）。 */
+   输入取活动层的全分辨率已生效像素（图层模型下抠图只作用于活动层）；
+   结果经 applyCanvas 回灌到活动层，作为一步可撤销操作（历史不清空）。 */
+let lastCutSource = null;   // 最近一次抠图前的原图（「虚化原图」背景用）
 function runGrabCut(rect) {
+  if (activeIsAdj()) { setStatus('当前是调整图层，没有像素可以抠图，请先切换到一个像素图层'); return; }
   if (!window.MTGrabCut || typeof window.MTGrabCut.cut !== 'function') { setStatus('抠图模块未就绪'); return; }
-  if (!editor || typeof editor.renderFullCanvas !== 'function') { setStatus('编辑引擎未就绪'); return; }
+  if (!editor || typeof editor.renderActiveLayerCanvas !== 'function') { setStatus('编辑引擎未就绪'); return; }
   exitSelectMode();
   $('#busyText').textContent = '正在抠图，大图会慢一点…';
   $('#busy').hidden = false;
@@ -496,8 +939,9 @@ function runGrabCut(rect) {
   setTimeout(() => {
     const fail = msg => { $('#busy').hidden = true; setStatus('抠图失败：' + msg); };
     try {
-      const full = editor.renderFullCanvas();
+      const full = editor.renderActiveLayerCanvas();
       if (!full) { fail('没有图片'); return; }
+      lastCutSource = full;
       const fctx = full.getContext('2d');
       const imgData = fctx.getImageData(0, 0, full.width, full.height);
       const handle = r => {
@@ -519,7 +963,80 @@ function runGrabCut(rect) {
     }
   }, 60);
 }
-$('#btnCutMode').addEventListener('click', () => enterSelectMode('cutout'));
+$('#btnCutMode').addEventListener('click', () => {
+  if (activeIsAdj()) { setStatus('当前是调整图层，没有像素可以抠图，请先切换到一个像素图层'); return; }
+  enterSelectMode('cutout');
+});
+
+/* ---------------- 一键换背景 ----------------
+   主体 = 活动层已生效像素（抠图结果/自带透明），边缘先柔化；背景层插到主体正下方，
+   与主体替换同属一步撤销（beginOp/endOp 事务）。 */
+function applyBackground(bg) {
+  if (!hasImg()) { setStatus('先打开一张图片'); return; }
+  if (activeIsAdj()) { setStatus('当前是调整图层，没有像素可以换背景，请先切换到一个像素图层'); return; }
+  const size = imgSize(); if (!size) return;
+  let blurCanvas = null;
+  if (bg.type === 'blur') {
+    const src = (lastCutSource && lastCutSource.width === size.w && lastCutSource.height === size.h)
+      ? lastCutSource : editor.renderFullCanvas();
+    blurCanvas = editor.applyStateToCanvas(src, { filter: 'gaussianBlur', filterParams: { radius: Math.max(4, Math.round(Math.min(size.w, size.h) * .02)) } });
+  }
+  const bgCanvas = window.MTNLEdit.renderBackground(bg, size.w, size.h, blurCanvas);
+  const softened = window.MTNLEdit.softenAlpha(editor.renderActiveLayerCanvas());
+  editor.beginOp('一键换背景');
+  editor.replaceActiveCanvas(softened);
+  editor.insertLayerBelowActive(bgCanvas, '背景·' + bg.name);
+  editor.endOp();
+  afterOp('已换背景：' + bg.name);
+}
+if (window.MTNLEdit) {
+  const grid = $('#bgGrid');
+  for (const bg of window.MTNLEdit.BACKGROUNDS) {
+    const b = document.createElement('button');
+    b.className = 'cell-btn bg-btn'; b.dataset.bg = bg.id;
+    const sw = document.createElement('span'); sw.className = 'bg-swatch'; sw.style.background = bg.css;
+    b.append(sw, document.createTextNode(bg.name));
+    b.addEventListener('click', () => applyBackground(bg));
+    grid.appendChild(b);
+  }
+}
+
+/* ---------------- 一句话修图 ----------------
+   MTNL 解析（nl/ 生成，纯规则）→ MTNLEdit 落地；解读区先行展示，点执行才改图。 */
+let nlParsed = null;
+function nlDescribe() {
+  const box = $('#nlRead');
+  const text = $('#nlInput').value.trim();
+  nlParsed = null;
+  if (!text) { box.innerHTML = '<p class="hint">输入后这里会先列出我理解的动作，点「执行修图」才真正改图。</p>'; return; }
+  if (!window.MTNL) { box.innerHTML = '<p class="nl-bad">解析模块未就绪，请刷新页面重试。</p>'; return; }
+  const r = window.MTNL.parseInstruction(text);
+  nlParsed = r;
+  const lines = window.MTNLEdit.describe(r);
+  let html = '';
+  if (lines.length) html += '<ul>' + lines.map(l => '<li>' + l + '</li>').join('') + '</ul>';
+  if (r.unsupported.length) html += '<p class="nl-bad">这些暂时做不了：' + r.unsupported.join('、') + '</p>';
+  if (r.unknown.length) html += '<p class="nl-ex">没听懂：「' + r.unknown.join('」「') + '」</p>';
+  if (!lines.length && !r.unsupported.length) {
+    html += '<p class="nl-ex">没太听懂，可以试试：「让天空更蓝」「照片太暗了」「背景虚化，人物亮一点」「来点电影感」。</p>';
+  } else if (!lines.length && r.unsupported.length) {
+    html += '<p class="nl-ex">这句里能做的暂时都还做不了，换个说法试试。</p>';
+  }
+  box.innerHTML = html;
+}
+$('#nlInput').addEventListener('input', nlDescribe);
+$('#btnNLGo').addEventListener('click', () => {
+  if (!hasImg()) { setStatus('先打开一张图片'); return; }
+  if (!nlParsed) nlDescribe();
+  const r = nlParsed;
+  if (!r || (!r.ops.length && !r.unsupported.length)) { setStatus('没听懂这句，看看下面的示例换个说法'); return; }
+  if (!r.ops.length) { setStatus('这些暂时做不了：' + r.unsupported.join('、')); return; }
+  const res = window.MTNLEdit.apply(editor, r);
+  let msg = '一句话修图完成：执行了 ' + res.done + ' 项';
+  if (res.skipped) msg += '；有 ' + res.skipped + ' 组区域调整需要像素图层，已跳过';
+  if (r.unsupported.length) msg += '；做不了的：' + r.unsupported.join('、');
+  afterOp(msg);
+});
 
 /* ---------------- 调节：13 个滑杆 ---------------- */
 const ADJUST = [
@@ -580,9 +1097,9 @@ function resetOneSlider(key) {
   }
 }
 /* 调节/曲线一段操作结束时记撤销检查点（引擎判断无变化则不记） */
-function checkpoint() {
+function checkpoint(label) {
   if (editor && typeof editor.checkpointAdjust === 'function') {
-    try { editor.checkpointAdjust(); } catch (e) { /* 忽略 */ }
+    try { editor.checkpointAdjust(label || '调节'); } catch (e) { /* 忽略 */ }
   }
 }
 $('#btnResetAdjust').addEventListener('click', async () => {
@@ -731,8 +1248,8 @@ curveCanvas.addEventListener('pointermove', e => {
   pts[curveDrag] = [Math.max(0, Math.min(255, Math.round(x))), Math.max(0, Math.min(255, Math.round(y)))];
   drawCurve(); applyCurves();
 });
-curveCanvas.addEventListener('pointerup', () => { curveDrag = null; checkpoint(); });
-curveCanvas.addEventListener('pointercancel', () => { if (curveDrag != null) { curveDrag = null; checkpoint(); } });
+curveCanvas.addEventListener('pointerup', () => { curveDrag = null; checkpoint('曲线'); });
+curveCanvas.addEventListener('pointercancel', () => { if (curveDrag != null) { curveDrag = null; checkpoint('曲线'); } });
 curveCanvas.addEventListener('dblclick', e => {
   const { px, py } = curveXY(e);
   const pts = curveState.points[curveState.channel];
@@ -743,7 +1260,7 @@ curveCanvas.addEventListener('dblclick', e => {
     const d = Math.hypot(pad + qx / 255 * (W - 2 * pad) - px, pad + (255 - qy) / 255 * (H - 2 * pad) - py);
     if (d < bestD) { bestD = d; best = i; }
   });
-  if (best >= 0) { pts.splice(best, 1); curveSel = -1; drawCurve(); applyCurves(); checkpoint(); }
+  if (best >= 0) { pts.splice(best, 1); curveSel = -1; drawCurve(); applyCurves(); checkpoint('曲线'); }
 });
 // Esc 退出选框/透视模式；Delete/Backspace 删除选中的曲线点（双击删点的兜底）
 document.addEventListener('keydown', e => {
@@ -757,13 +1274,13 @@ document.addEventListener('keydown', e => {
   if (curveSel < 0 || curveSel >= pts.length || pts.length <= 2) return;
   pts.splice(curveSel, 1);
   curveSel = -1;
-  drawCurve(); applyCurves(); checkpoint();
+  drawCurve(); applyCurves(); checkpoint('曲线');
   setStatus('已删除曲线点');
 });
 $('#curveChannel').addEventListener('change', e => { curveState.channel = e.target.value; curveSel = -1; drawCurve(); });
 $('#btnCurveReset').addEventListener('click', () => {
   curveState.points[curveState.channel] = [[0, 0], [255, 255]];
-  drawCurve(); applyCurves(); checkpoint();
+  drawCurve(); applyCurves(); checkpoint('曲线');
   setStatus('曲线已重置');
 });
 
@@ -807,6 +1324,28 @@ function drawHist() {
   ctx.globalCompositeOperation = 'source-over';
 }
 
+/* ---------------- 通用滑杆行（滤镜对话框 / 高级调整共用，数据驱动生成） ---------------- */
+function sliderRowEl(label, min, max, step, value, onInput, onChange) {
+  const dec = (String(step).split('.')[1] || '').length;
+  const fmt = v => dec ? Number(v).toFixed(dec) : String(Math.round(v));
+  const row = document.createElement('div');
+  row.className = 'slider-row';
+  const head = document.createElement('div');
+  head.className = 'sr-head';
+  const lab = document.createElement('label');
+  lab.textContent = label;
+  const val = document.createElement('span');
+  val.className = 'sr-val'; val.textContent = fmt(value);
+  const input = document.createElement('input');
+  input.type = 'range'; input.min = min; input.max = max; input.step = step; input.value = value;
+  input.setAttribute('aria-label', label);
+  head.appendChild(lab); head.appendChild(val);
+  row.appendChild(head); row.appendChild(input);
+  input.addEventListener('input', () => { const v = parseFloat(input.value); val.textContent = fmt(v); onInput(v); });
+  if (onChange) input.addEventListener('change', () => onChange(parseFloat(input.value)));
+  return row;
+}
+
 /* ---------------- 滤镜 ---------------- */
 (function buildFilters() {
   const grid = $('#filterGrid');
@@ -827,6 +1366,7 @@ function drawHist() {
   noneBtn.textContent = '无滤镜';
   noneBtn.addEventListener('click', async () => {
     if (!hasImg()) { setStatus('先打开一张图片'); return; }
+    closeFilterDlg(false);
     if (await call(() => editor.clearFilter(), '取消滤镜失败')) afterOp('已取消滤镜');
   });
   grid.appendChild(noneBtn);
@@ -837,6 +1377,8 @@ function drawHist() {
     b.textContent = f.name;
     b.addEventListener('click', async () => {
       if (!hasImg()) { setStatus('先打开一张图片'); return; }
+      if (f.params && f.params.length) { openFilterDlg(f); return; }
+      closeFilterDlg(false);
       if (await call(() => editor.applyFilter(f.id), '滤镜失败')) afterOp('已应用滤镜：' + f.name);
     });
     grid.appendChild(b);
@@ -845,6 +1387,971 @@ function drawHist() {
   if (editor && typeof editor.on === 'function') {
     try { editor.on('state', s => markActive(s && s.filter)); } catch (e) { /* 忽略 */ }
   }
+
+  /* ---- 参数对话框：滑杆由 f.params 自动生成，拖动经 setFilterLive 实时预览；
+          应用 = checkpoint 记一步撤销；取消 = 把滤镜状态调回打开前 ---- */
+  const dlg = $('#filterDlg');
+  let dlgCtx = null; // {f, prev:{id, params}, cur:{}}
+  function openFilterDlg(f) {
+    if (!editor || typeof editor.setFilterLive !== 'function') return;
+    const prev = { id: editor.getFilter(), params: editor.getFilterParams ? editor.getFilterParams() : null };
+    const cur = {};
+    for (const d of f.params) {
+      const v = (prev.id === f.id && prev.params && typeof prev.params[d.key] === 'number') ? prev.params[d.key] : d.def;
+      cur[d.key] = Math.min(d.max, Math.max(d.min, v));
+    }
+    dlgCtx = { f, prev, cur };
+    $('#filterDlgTitle').textContent = f.name + ' 参数';
+    const box = $('#filterDlgSliders');
+    box.innerHTML = '';
+    for (const d of f.params) {
+      box.appendChild(sliderRowEl(d.name, d.min, d.max, d.step, cur[d.key], v => {
+        cur[d.key] = v;
+        try { editor.setFilterLive(f.id, { ...cur }); } catch (e) { /* 忽略 */ }
+      }));
+    }
+    dlg.hidden = false;
+    try { editor.setFilterLive(f.id, { ...cur }); } catch (e) { /* 忽略 */ }
+  }
+  function closeFilterDlg(apply) {
+    if (!dlgCtx) { dlg.hidden = true; return; }
+    const { f, prev } = dlgCtx;
+    dlgCtx = null;
+    dlg.hidden = true;
+    if (apply) {
+      checkpoint('滤镜')
+      afterOp('已应用滤镜：' + f.name);
+    } else {
+      try { editor.setFilterLive(prev.id, prev.params); } catch (e) { /* 忽略 */ }
+      refresh();
+    }
+  }
+  $('#fdApply').addEventListener('click', () => closeFilterDlg(true));
+  $('#fdCancel').addEventListener('click', () => closeFilterDlg(false));
+  dlg.addEventListener('click', e => { if (e.target === dlg) closeFilterDlg(false); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && dlgCtx) { e.stopPropagation(); closeFilterDlg(false); }
+  }, true);
+})();
+
+/* ---------------- LUT 电影调色墙 ----------------
+   格子 = 当前合成预览缩略图逐个过 LUT 的实时渲染；点格子 = applyLut（状态式一步撤销），
+   悬停 = setLutLive 在大图上预览、移开恢复；强度滑杆走 setLutLive + checkpoint。 */
+(function buildLutWall() {
+  const grid = $('#lutGrid');
+  if (!grid || !window.MTLut || !editor) { if (grid) grid.hidden = true; const b = $('#btnLutImport'); if (b) b.hidden = true; return; }
+  const LU = window.MTLut;
+  let customState = null;          // 导入的 .cube（{id:'custom', name, cube, strength}）
+  let hoverSaved = undefined;      // 悬停预览前的大图 LUT 状态（undefined = 未悬停）
+  const cells = new Map();         // key(null|'tealOrange'|...|'custom') → {btn, cv}
+  let wallSig = '', wallDirty = true, wallTimer = null;
+
+  let painting = false;   // 抓底图时临时摘 LUT 会触发状态事件，用它挡住重入
+  /* 底图 = 当前合成预览临时摘掉活动层 LUT 的样子（否则套了一个 LUT 后，
+     其他格子的预览会叠在已调色的图上，所见非所得）。 */
+  function baseThumb() {
+    const cur = editor.getLut ? editor.getLut() : null;
+    if (cur) {
+      painting = true;
+      try { editor.setLutLive(null); } catch (e) { /* 忽略 */ }
+    }
+    const src = editorCanvas;
+    const w = 96, h = Math.max(1, Math.round(96 * src.height / Math.max(1, src.width)));
+    const base = document.createElement('canvas');
+    base.width = w; base.height = h;
+    base.getContext('2d').drawImage(src, 0, 0, w, h);
+    if (cur) {
+      try { editor.setLutLive(cur); } catch (e) { /* 忽略 */ }
+      painting = false;
+      markActive(cur);
+    }
+    return base;
+  }
+  function paintCell(key, base) {
+    const c = cells.get(key);
+    if (!c) return;
+    const st = key === null ? null : key === 'custom' ? customState : { id: key, strength: 100 };
+    if (key === 'custom' && !customState) return;
+    const t = st ? LU.applyToCanvas(base, { ...st, strength: 100 }) : base;
+    c.cv.width = t.width; c.cv.height = t.height;
+    c.cv.getContext('2d').drawImage(t, 0, 0);
+  }
+  function rebuildWall() {
+    if (!hasImg()) return;
+    const base = baseThumb();
+    cells.forEach((c, key) => paintCell(key, base));
+    wallDirty = false;
+  }
+  function markActive(lut) {
+    const key = !lut ? null : lut.id === 'custom' ? 'custom' : lut.id;
+    cells.forEach((c, k) => c.btn.classList.toggle('active', k === key));
+    const box = $('#lutStrengthBox');
+    if (box) box.style.display = lut ? '' : 'none';
+    if (lut && strengthInput) {
+      strengthInput.value = typeof lut.strength === 'number' ? lut.strength : 100;
+      strengthVal.textContent = String(strengthInput.value);
+    }
+  }
+  function ensureCustomCell() {
+    if (!customState) return;
+    if (!cells.has('custom')) addCell('custom', '自定义');
+    if (hasImg()) paintCell('custom', baseThumb());
+  }
+  function cellState(key) {
+    const cur = editor.getLut ? editor.getLut() : null;
+    const strength = cur && typeof cur.strength === 'number' ? cur.strength : 100;
+    if (key === 'custom') return customState ? { ...customState, strength } : null;
+    return { id: key, strength };
+  }
+  function addCell(key, label) {
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn lut-cell';
+    btn.dataset.lut = key === null ? '' : key;
+    const cv = document.createElement('canvas');
+    cv.width = 96; cv.height = 64;
+    const span = document.createElement('span');
+    span.textContent = label;
+    btn.appendChild(cv); btn.appendChild(span);
+    btn.addEventListener('click', async () => {
+      if (!hasImg()) { setStatus('先打开一张图片'); return; }
+      hoverSaved = undefined;
+      if (key === null) {
+        if (await call(() => editor.clearLut(), '清除 LUT 失败')) afterOp('已清除 LUT 调色');
+        return;
+      }
+      const st = cellState(key);
+      if (!st) { setStatus('先导入一个 .cube 文件'); return; }
+      if (await call(() => editor.applyLut(st), '应用 LUT 失败')) afterOp('已应用调色：' + label);
+    });
+    btn.addEventListener('mouseenter', () => {
+      if (!hasImg() || key === null) return;
+      const st = cellState(key);
+      if (!st) return;
+      hoverSaved = editor.getLut();
+      try { editor.setLutLive(st); } catch (e) { /* 忽略 */ }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (hoverSaved === undefined) return;
+      const prev = hoverSaved;
+      hoverSaved = undefined;
+      try { editor.setLutLive(prev); } catch (e) { /* 忽略 */ }
+      refresh();
+    });
+    grid.appendChild(btn);
+    cells.set(key, { btn, cv });
+  }
+  addCell(null, '无 LUT');
+  for (const p of LU.list) addCell(p.id, p.name);
+
+  /* 强度滑杆：拖动实时混合，松手记一步 */
+  let strengthInput = null, strengthVal = null;
+  const sBox = $('#lutStrengthBox');
+  if (sBox) {
+    const row = sliderRowEl('强度', 0, 100, 1, 100, v => {
+      const cur = editor.getLut();
+      if (!cur) return;
+      const next = { ...cur, strength: v };
+      if (next.id === 'custom' && customState) customState.strength = v;
+      try { editor.setLutLive(next); } catch (e) { /* 忽略 */ }
+    }, () => checkpoint('LUT 调色'));
+    sBox.appendChild(row);
+    strengthInput = row.querySelector('input');
+    strengthVal = row.querySelector('.sr-val');
+    sBox.style.display = 'none';
+  }
+
+  /* 导入 .cube：先由 MTLut.parseCube 校验，坏文件给中文提示、不动图 */
+  $('#btnLutImport').addEventListener('click', () => {
+    if (!hasImg()) { setStatus('先打开一张图片'); return; }
+    $('#cubeInput').click();
+  });
+  $('#cubeInput').addEventListener('change', async e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const text = await f.text();
+      LU.parseCube(text); // 只为校验（引擎应用时会再解析并缓存）
+      customState = { id: 'custom', name: f.name, cube: text, strength: 100 };
+      ensureCustomCell();
+      if (await call(() => editor.applyLut({ ...customState }), '应用 LUT 失败')) {
+        afterOp('已导入并应用 LUT：' + f.name);
+      }
+    } catch (err) {
+      setStatus('导入失败：' + (err && err.message ? err.message : '文件无效'));
+    }
+  });
+
+  if (editor && typeof editor.on === 'function') {
+    try {
+      editor.on('state', s => {
+        if (painting) return;
+        if (s && s.lut && s.lut.id === 'custom' && (!customState || customState.cube !== s.lut.cube)) {
+          customState = s.lut; // 工程文件打开/撤销带来的自定义 LUT
+          ensureCustomCell();
+        }
+        markActive(s ? s.lut : null);
+        const sig = !s || !s.hasImage ? '' :
+          s.w + 'x' + s.h + '|' + s.activeLayer + '|' + changeCounter + '|' +
+          s.layers.map(l => l.rev + '/' + l.maskRev).join(',');
+        if (sig !== wallSig) { wallSig = sig; wallDirty = true; }
+        if (wallDirty && $('.page[data-page="filters"]').classList.contains('active')) {
+          clearTimeout(wallTimer);
+          wallTimer = setTimeout(rebuildWall, 250);
+        }
+      });
+    } catch (e) { /* 忽略 */ }
+  }
+  const tabBtn = $('.tab[data-tab="filters"]');
+  if (tabBtn) tabBtn.addEventListener('click', () => setTimeout(() => { if (wallDirty) rebuildWall(); }, 60));
+})();
+
+/* ---------------- 高级调整（MTAdjust.defs 数据驱动生成） ---------------- */
+let adjUIState = null;   // 与引擎活动层 adj 状态同步的镜像
+let adjSig = '';
+let adjDragging = false;
+(function buildAdjUI() {
+  const box = $('#adjBox');
+  if (!box || !window.MTAdjust || !editor) { if (box) box.hidden = true; return; }
+  const groups = {};
+  function adjLive() {
+    bumpChange();
+    try { editor.setAdj(adjUIState && Object.keys(adjUIState).length ? adjUIState : null); } catch (e) { /* 忽略 */ }
+  }
+  function extraRow(def, ex, st) {
+    const row = document.createElement('div');
+    row.className = 'adj-extra';
+    const lab = document.createElement('label');
+    lab.textContent = ex.label;
+    row.appendChild(lab);
+    if (ex.type === 'select') {
+      const sel = document.createElement('select');
+      for (const o of ex.options) {
+        const op = document.createElement('option');
+        op.value = o.v; op.textContent = o.t;
+        sel.appendChild(op);
+      }
+      sel.value = ex.get(st);
+      sel.addEventListener('change', () => { ex.set(st, parseFloat(sel.value)); paintBody(def); adjLive(); checkpoint('高级调整'); });
+      row.appendChild(sel);
+    } else if (ex.type === 'check') {
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = !!ex.get(st);
+      cb.addEventListener('change', () => { ex.set(st, cb.checked); paintBody(def); adjLive(); checkpoint('高级调整'); });
+      row.appendChild(cb);
+    } else if (ex.type === 'color') {
+      const ci = document.createElement('input');
+      ci.type = 'color';
+      const c = ex.get(st);
+      ci.value = '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+      ci.addEventListener('input', () => {
+        const h = ci.value;
+        ex.set(st, [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]);
+        adjLive();
+      });
+      ci.addEventListener('change', () => checkpoint('高级调整'));
+      row.appendChild(ci);
+    } else if (ex.type === 'preset') {
+      const b = document.createElement('button');
+      b.className = 'mini-btn adj-preset';
+      b.textContent = ex.label;
+      b.addEventListener('click', () => { ex.apply(st); paintBody(def); adjLive(); checkpoint('高级调整'); });
+      row.appendChild(b);
+    }
+    return row;
+  }
+  function paintBody(def) {
+    const g = groups[def.id];
+    if (!g) return;
+    const st = adjUIState && adjUIState[def.id];
+    g.check.checked = !!st;
+    g.body.innerHTML = '';
+    if (!st) { g.body.hidden = true; g.group.classList.remove('open'); return; }
+    g.body.hidden = false;
+    g.group.classList.add('open');
+    for (const ex of (def.extras ? def.extras(st) : [])) g.body.appendChild(extraRow(def, ex, st));
+    for (const sl of def.sliders(st)) {
+      g.body.appendChild(sliderRowEl(sl.label, sl.min, sl.max, sl.step, sl.get(st),
+        v => { adjDragging = true; sl.set(st, v); adjLive(); },
+        () => { adjDragging = false; checkpoint('高级调整'); }));
+    }
+  }
+  function paintAll() { for (const def of window.MTAdjust.defs) paintBody(def); }
+  for (const def of window.MTAdjust.defs) {
+    const group = document.createElement('div');
+    group.className = 'adj-group';
+    const head = document.createElement('div');
+    head.className = 'adj-head';
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.setAttribute('aria-label', '启用' + def.name);
+    const name = document.createElement('span');
+    name.className = 'adj-name'; name.textContent = def.name;
+    const arrow = document.createElement('span');
+    arrow.className = 'adj-arrow'; arrow.textContent = '▶';
+    head.appendChild(check); head.appendChild(name); head.appendChild(arrow);
+    const body = document.createElement('div');
+    body.className = 'adj-body';
+    body.hidden = true;
+    group.appendChild(head); group.appendChild(body);
+    box.appendChild(group);
+    groups[def.id] = { group, body, check };
+    check.addEventListener('change', () => {
+      if (!hasImg()) { check.checked = false; setStatus('先打开一张图片'); return; }
+      adjUIState = adjUIState || {};
+      if (check.checked) adjUIState[def.id] = def.make();
+      else delete adjUIState[def.id];
+      paintBody(def);
+      adjLive();
+      checkpoint('高级调整');
+      setStatus(check.checked ? '已启用调整：' + def.name : '已关闭调整：' + def.name);
+    });
+    head.addEventListener('click', e => {
+      if (e.target === check) return;
+      if (!adjUIState || !adjUIState[def.id]) return;
+      body.hidden = !body.hidden;
+      group.classList.toggle('open', !body.hidden);
+    });
+  }
+  // 引擎状态变化（切换图层/撤销/重做/载入）时把界面镜像同步回来
+  if (editor && typeof editor.on === 'function') {
+    try {
+      editor.on('state', s => {
+        if (adjDragging) return;
+        const sig = JSON.stringify((s && s.adj) || null);
+        if (sig === adjSig) return;
+        adjSig = sig;
+        adjUIState = s && s.adj ? JSON.parse(sig) : null;
+        paintAll();
+      });
+    } catch (e) { /* 忽略 */ }
+  }
+})();
+
+/* ---------------- 智能一键优化 ---------------- */
+$('#btnSmart').addEventListener('click', () => {
+  if (!hasImg()) { setStatus('先打开一张图片'); return; }
+  if (!window.MTAdjust || !editor || typeof editor.getHistogram !== 'function') { setStatus('优化模块未就绪'); return; }
+  const d = window.MTAdjust.autoOptimize(editor.getHistogram());
+  const labels = {};
+  for (const a of ADJUST) labels[a.key] = a.label;
+  const parts = [];
+  const merged = {};
+  const cur = editor.getAdjust();
+  for (const k in d) {
+    if (Math.abs(d[k]) < 0.01) continue;
+    merged[k] = (cur[k] || 0) + d[k];
+    parts.push(labels[k] + ' ' + (d[k] > 0 ? '+' : '') + (k === 'exposure' ? d[k].toFixed(2) : Math.round(d[k])));
+  }
+  if (!parts.length) { setStatus('画面已经不错，不用优化'); return; }
+  editor.setAdjust(merged);
+  bumpChange();
+  checkpoint('智能一键优化');
+  syncUIFromEngine();
+  refresh();
+  setStatus('智能优化完成：' + parts.join('、'));
+});
+
+/* ---------------- 图层 ---------------- */
+const BLEND_MODES = [
+  ['normal', '正常'], ['dissolve', '溶解'], ['darken', '变暗'], ['multiply', '正片叠底'],
+  ['colorBurn', '颜色加深'], ['linearBurn', '线性加深'], ['darkerColor', '深色'],
+  ['lighten', '变亮'], ['screen', '滤色'], ['colorDodge', '颜色减淡'], ['linearDodge', '线性减淡'],
+  ['lighterColor', '浅色'], ['overlay', '叠加'], ['softLight', '柔光'], ['hardLight', '强光'],
+  ['vividLight', '亮光'], ['linearLight', '线性光'], ['pinLight', '点光'], ['hardMix', '实色混合'],
+  ['difference', '差值'], ['exclusion', '排除'], ['subtract', '减去'], ['divide', '划分'],
+  ['hue', '色相'], ['saturation', '饱和度'], ['color', '颜色'], ['luminosity', '明度']
+];
+(function buildLayersUI() {
+  const listBox = $('#layerList');
+  const blendSel = $('#layerBlend');
+  const opInput = $('#layerOpacity');
+  const opVal = $('#layerOpacityVal');
+  if (!listBox || !blendSel || !opInput) return;
+  for (const [id, name] of BLEND_MODES) {
+    const o = document.createElement('option');
+    o.value = id; o.textContent = name;
+    blendSel.appendChild(o);
+  }
+  let sig = '';
+  let opacityDragging = false;
+
+  function drawThumb(canvas, layerId) {
+    const src = editor && typeof editor.getLayerCanvas === 'function' ? editor.getLayerCanvas(layerId) : null;
+    drawFit(canvas, src);
+  }
+
+  function drawMaskThumb(canvas, layerId) {
+    const src = editor && typeof editor.getLayerMaskCanvas === 'function' ? editor.getLayerMaskCanvas(layerId) : null;
+    drawFit(canvas, src);
+  }
+
+  function drawFit(canvas, src) {
+    if (!src || !src.width) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const s = Math.min(canvas.width / src.width, canvas.height / src.height);
+    const w = Math.max(1, Math.round(src.width * s)), h = Math.max(1, Math.round(src.height * s));
+    ctx.drawImage(src, Math.round((canvas.width - w) / 2), Math.round((canvas.height - h) / 2), w, h);
+  }
+
+  /* 调整图层缩略图：半黑半白圆（Photoshop 调整层图标的简化画法） */
+  function drawAdjThumb(canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const cx = canvas.width / 2, cy = canvas.height / 2, r = Math.min(canvas.width, canvas.height) / 2 - 4;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = '#e8e8e8'; ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, Math.PI / 2); ctx.fillStyle = '#1c1c1c'; ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.strokeStyle = '#8a8a8a'; ctx.stroke();
+  }
+
+  function startRename(item, meta, idx) {
+    const span = item.querySelector('.layer-name');
+    if (!span || item.querySelector('.layer-name-input')) return;
+    const input = document.createElement('input');
+    input.className = 'layer-name-input';
+    input.value = meta.name;
+    span.replaceWith(input);
+    input.focus(); input.select();
+    let done = false;
+    const finish = async commit => {
+      if (done) return;
+      done = true;
+      const v = input.value.trim();
+      sig = ''; // 强制面板重绘（恢复名称显示）
+      if (commit && v && v !== meta.name) {
+        if (editor.getActiveLayerIndex && editor.getActiveLayerIndex() !== idx) editor.setActiveLayer(idx);
+        if (await call(() => editor.renameLayer(v), '改名失败')) afterOp('图层已改名为「' + v + '」');
+        else { sig = ''; renderPanel(lastState); }
+      } else {
+        sig = '';
+        renderPanel(lastState);
+      }
+    };
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') finish(true);
+      else if (e.key === 'Escape') finish(false);
+      e.stopPropagation();
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('click', e => e.stopPropagation());
+  }
+
+  function renderPanel(s) {
+    if (!s || !Array.isArray(s.layers)) return;
+    const metas = s.layers;
+    const active = metas[s.activeLayer] || null;
+    // 顶部控件跟随活动层（拖不透明度时不回写滑杆，避免打架）
+    if (active) {
+      blendSel.disabled = active.kind === 'adj'; // 调整层混合模式固定普通
+      if (document.activeElement !== blendSel) blendSel.value = active.blendMode;
+      if (!opacityDragging) {
+        opInput.value = Math.round(active.opacity * 100);
+        opVal.textContent = Math.round(active.opacity * 100) + '%';
+      }
+    }
+    const newSig = JSON.stringify([s.w, s.h, s.activeLayer,
+      metas.map(m => [m.id, m.name, m.kind, m.visible, m.opacity, m.blendMode, m.rev,
+        m.hasMask, m.maskEnabled, m.maskRev, m.maskSelected, m.hasStyle])]);
+    if (newSig === sig) return;
+    if (listBox.querySelector('.layer-name-input')) return; // 正在改名，别冲掉输入框
+    sig = newSig;
+    listBox.innerHTML = '';
+    // 列表自上而下显示（数组是自下而上，倒序渲染）
+    for (let vi = metas.length - 1; vi >= 0; vi--) {
+      const meta = metas[vi];
+      const idx = vi;
+      const item = document.createElement('div');
+      item.className = 'layer-item' + (meta.active ? ' active' : '');
+      const eye = document.createElement('button');
+      eye.className = 'layer-eye' + (meta.visible ? '' : ' off');
+      eye.title = meta.visible ? '隐藏图层' : '显示图层';
+      eye.innerHTML = meta.visible
+        ? '<svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>'
+        : '<svg viewBox="0 0 24 24"><path d="M4 4l16 16"/><path d="M10.6 6.1A9.8 9.8 0 0 1 12 6c6 0 9.5 6 9.5 6a17.6 17.6 0 0 1-2.7 3.1M6.1 8A16.9 16.9 0 0 0 2.5 12S6 18 12 18c1.2 0 2.3-.2 3.3-.6"/></svg>';
+      eye.addEventListener('click', async e => {
+        e.stopPropagation();
+        if (!hasImg()) { setStatus('先打开一张图片'); return; }
+        if (await call(() => editor.setLayerVisibleAt(idx, !meta.visible), '显隐切换失败')) {
+          afterOp(meta.visible ? '已隐藏图层' : '已显示图层');
+        }
+      });
+      const thumb = document.createElement('canvas');
+      thumb.className = 'layer-thumb';
+      thumb.width = 52; thumb.height = 38;
+      const name = document.createElement('span');
+      name.className = 'layer-name';
+      name.textContent = meta.name;
+      name.title = meta.name + '（双击改名）';
+      item.appendChild(eye); item.appendChild(thumb);
+      if (meta.hasMask) {
+        const mthumb = document.createElement('canvas');
+        mthumb.className = 'layer-thumb layer-mask-thumb' +
+          (meta.maskSelected ? ' sel' : '') + (meta.maskEnabled ? '' : ' off');
+        mthumb.width = 38; mthumb.height = 38;
+        mthumb.title = meta.maskEnabled ? '图层蒙版（点击选中蒙版）' : '图层蒙版（已停用，点击选中）';
+        mthumb.addEventListener('click', async e => {
+          e.stopPropagation();
+          if (!editor || !hasImg()) return;
+          if (editor.getActiveLayerIndex && editor.getActiveLayerIndex() !== idx) {
+            await call(() => editor.setActiveLayer(idx), '切换图层失败');
+          }
+          await call(() => editor.setMaskTarget(meta.maskSelected ? null : meta.id), '选中蒙版失败');
+          setStatus(meta.maskSelected ? '已取消选中蒙版' : '已选中「' + meta.name + '」的蒙版：反相/停用/删除将对它生效');
+        });
+        item.appendChild(mthumb);
+        drawMaskThumb(mthumb, meta.id);
+      }
+      item.appendChild(name);
+      if (meta.kind === 'adj') {
+        const tag = document.createElement('span');
+        tag.className = 'layer-tag';
+        tag.textContent = '调整';
+        item.appendChild(tag);
+      }
+      if (meta.hasStyle) {
+        const ftag = document.createElement('span');
+        ftag.className = 'layer-tag';
+        ftag.textContent = 'fx';
+        ftag.title = '已添加图层样式';
+        item.appendChild(ftag);
+      }
+      item.addEventListener('click', async () => {
+        if (!editor || !hasImg()) return;
+        if (editor.getActiveLayerIndex && editor.getActiveLayerIndex() === idx) return;
+        if (await call(() => editor.setActiveLayer(idx), '切换图层失败')) {
+          syncUIFromEngine();
+          refresh();
+          setStatus('当前图层：' + meta.name);
+        }
+      });
+      item.addEventListener('dblclick', () => startRename(item, meta, idx));
+      listBox.appendChild(item);
+      if (meta.kind === 'adj') drawAdjThumb(thumb); else drawThumb(thumb, meta.id);
+    }
+  }
+  if (editor && typeof editor.on === 'function') {
+    try { editor.on('state', renderPanel); } catch (e) { /* 忽略 */ }
+  }
+
+  async function layerOp(fn, label) {
+    if (!hasImg()) { setStatus('先打开一张图片'); return; }
+    if (await call(fn, '图层操作失败')) afterOp(label);
+  }
+  $('#btnLayerAdd').addEventListener('click', () => layerOp(() => editor.addLayer(), '已新建图层'));
+  $('#btnLayerDup').addEventListener('click', () => layerOp(() => editor.duplicateLayer(), '已复制图层'));
+  $('#btnLayerDel').addEventListener('click', () => layerOp(() => editor.deleteLayer(), '已删除图层'));
+  $('#btnLayerUp').addEventListener('click', () => layerOp(() => editor.moveLayer(1), '图层已上移'));
+  $('#btnLayerDown').addEventListener('click', () => layerOp(() => editor.moveLayer(-1), '图层已下移'));
+  $('#btnLayerMerge').addEventListener('click', () => layerOp(() => editor.mergeDown(), '已向下合并'));
+  $('#btnLayerFlatten').addEventListener('click', () => layerOp(() => editor.flatten(), '已拼合为一层'));
+  $('#btnLayerAdj').addEventListener('click', () => layerOp(() => editor.addAdjustmentLayer(), '已新建调整图层：用调节/曲线/高级调整给它设置效果，它会作用到下面的层'));
+  // ----- 蒙版按钮 -----
+  const metaFind = pred => ((lastState && lastState.layers) || []).find(pred) || null;
+  const maskTargetMeta = () => metaFind(m => m.maskSelected) || metaFind(m => m.active);
+  async function maskOp(fn, label, needMask) {
+    if (!hasImg()) { setStatus('先打开一张图片'); return; }
+    if (needMask) {
+      const t = maskTargetMeta();
+      if (!t || !t.hasMask) { setStatus('还没有蒙版，先给图层添加一个蒙版'); return; }
+    }
+    if (await call(fn, '蒙版操作失败')) afterOp(label);
+  }
+  $('#btnMaskWhite').addEventListener('click', () => maskOp(() => editor.addLayerMask('white'), '已给当前层添加白色蒙版（全部显示）'));
+  $('#btnMaskBlack').addEventListener('click', () => maskOp(() => editor.addLayerMask('black'), '已给当前层添加黑色蒙版（全部隐藏）'));
+  $('#btnMaskSel').addEventListener('click', () => {
+    if (!hasImg()) { setStatus('先打开一张图片'); return; }
+    if (!editor.selHas || !editor.selHas()) { setStatus('还没有选区，先用选区工具在图上选一块'); return; }
+    maskOp(() => editor.addLayerMask('selection'), '已从选区给当前层添加蒙版');
+  });
+  $('#btnMaskInvert').addEventListener('click', () => maskOp(() => editor.invertLayerMask(), '蒙版已反相', true));
+  $('#btnMaskDel').addEventListener('click', () => maskOp(() => editor.removeLayerMask(), '蒙版已删除', true));
+  $('#btnMaskToggle').addEventListener('click', () => {
+    const t = maskTargetMeta();
+    maskOp(() => editor.setLayerMaskEnabled(!t.maskEnabled),
+      t && t.maskEnabled ? '蒙版已停用（图层恢复全部显示）' : '蒙版已启用', true);
+  });
+  blendSel.addEventListener('change', async () => {
+    if (!hasImg()) { setStatus('先打开一张图片'); return; }
+    const name = (BLEND_MODES.find(m => m[0] === blendSel.value) || [])[1] || blendSel.value;
+    if (await call(() => editor.setLayerBlendMode(blendSel.value), '混合模式设置失败')) afterOp('混合模式：' + name);
+  });
+  opInput.addEventListener('input', () => {
+    opacityDragging = true;
+    const v = parseInt(opInput.value, 10);
+    opVal.textContent = v + '%';
+    bumpChange();
+    if (editor) { try { editor.setLayerOpacity(v / 100); } catch (e) { /* 忽略 */ } }
+  });
+  opInput.addEventListener('change', () => { opacityDragging = false; checkpoint('图层不透明度'); });
+})();
+
+/* ---------------- 图层样式对话框（MTStyles.DEFS 数据驱动生成；拖动经 setLayerStyleLive 实时预览，
+   应用 = checkpoint 记一步撤销，取消 = 调回打开前的值；与滤镜参数对话框同口径） ---------------- */
+(function buildStyleDlg() {
+  const dlgEl = $('#styleDlg');
+  const body = $('#styleDlgBody');
+  const btn = $('#btnLayerStyle');
+  if (!dlgEl || !body || !btn || !window.MTStyles || !editor) return;
+  let ctx = null; // {prev, draft}
+  const live = () => {
+    try { editor.setLayerStyleLive(Object.keys(ctx.draft).length ? ctx.draft : null); } catch (e) { /* 忽略 */ }
+  };
+  function paramRow(fx, p) {
+    if (p.t === 'range') {
+      return sliderRowEl(p.label, p.min, p.max, p.step || 1, fx[p.k], v => { fx[p.k] = v; live(); });
+    }
+    const row = document.createElement('div');
+    row.className = 'adj-extra';
+    const lab = document.createElement('label');
+    lab.textContent = p.label;
+    row.appendChild(lab);
+    if (p.t === 'color') {
+      const ci = document.createElement('input');
+      ci.type = 'color'; ci.value = fx[p.k];
+      ci.addEventListener('input', () => { fx[p.k] = ci.value; live(); });
+      row.appendChild(ci);
+    } else if (p.t === 'check') {
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = !!fx[p.k];
+      cb.addEventListener('change', () => { fx[p.k] = cb.checked; live(); });
+      row.appendChild(cb);
+    } else { // select / blend
+      const sel = document.createElement('select');
+      for (const [v, t] of (p.t === 'blend' ? BLEND_MODES : p.opts)) {
+        const op = document.createElement('option');
+        op.value = v; op.textContent = t;
+        sel.appendChild(op);
+      }
+      sel.value = fx[p.k];
+      sel.addEventListener('change', () => { fx[p.k] = sel.value; live(); });
+      row.appendChild(sel);
+    }
+    return row;
+  }
+  function paint() {
+    body.innerHTML = '';
+    for (const def of window.MTStyles.DEFS) {
+      const fx = ctx.draft[def.id];
+      const group = document.createElement('div');
+      group.className = 'adj-group' + (fx && fx.on ? ' open' : '');
+      const head = document.createElement('div');
+      head.className = 'adj-head';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = !!(fx && fx.on);
+      cb.addEventListener('change', () => {
+        if (cb.checked) ctx.draft[def.id] = window.MTStyles.withDefaults(def.id, ctx.draft[def.id] || window.MTStyles.fresh(def.id));
+        else if (ctx.draft[def.id]) ctx.draft[def.id].on = false;
+        paint(); live();
+      });
+      const nm = document.createElement('span');
+      nm.textContent = def.name;
+      head.appendChild(cb); head.appendChild(nm);
+      group.appendChild(head);
+      if (fx && fx.on) {
+        const bd = document.createElement('div');
+        bd.className = 'adj-body';
+        const full = window.MTStyles.withDefaults(def.id, fx);
+        ctx.draft[def.id] = full;
+        for (const p of def.params) bd.appendChild(paramRow(full, p));
+        group.appendChild(bd);
+      }
+      body.appendChild(group);
+    }
+  }
+  function open() {
+    if (!hasImg()) { setStatus('先打开一张图片'); return; }
+    if (activeIsAdj()) { setStatus('调整图层不能添加图层样式，请先切换到一个像素图层'); return; }
+    const prev = editor.getLayerStyle ? editor.getLayerStyle() : null;
+    ctx = { prev, draft: prev ? JSON.parse(JSON.stringify(prev)) : {} };
+    paint();
+    dlgEl.hidden = false;
+  }
+  function close(apply) {
+    if (!ctx) { dlgEl.hidden = true; return; }
+    const prev = ctx.prev;
+    ctx = null;
+    dlgEl.hidden = true;
+    if (apply) { checkpoint('图层样式'); afterOp('已应用图层样式'); }
+    else { try { editor.setLayerStyleLive(prev); } catch (e) { /* 忽略 */ } refresh(); }
+  }
+  btn.addEventListener('click', open);
+  $('#sdApply').addEventListener('click', () => close(true));
+  $('#sdCancel').addEventListener('click', () => close(false));
+  $('#sdClear').addEventListener('click', () => { if (ctx) { ctx.draft = {}; paint(); live(); } });
+  dlgEl.addEventListener('click', e => { if (e.target === dlgEl) close(false); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && ctx) { e.stopPropagation(); close(false); }
+  }, true);
+})();
+
+/* ---------------- 画笔页（算法在 brush.js，逐项翻译自 PhotoCraft；UI 数据驱动） ---------------- */
+const PAINT_TOOLS = [
+  { id: 'brush', name: '画笔', sliders: [['size', '大小', 1, 300, 1], ['hard', '硬度', 0, 100, 1], ['opacity', '不透明度', 1, 100, 1]] },
+  { id: 'eraser', name: '橡皮擦', sliders: [['size', '大小', 1, 300, 1], ['hard', '硬度', 0, 100, 1], ['opacity', '不透明度', 1, 100, 1]] },
+  { id: 'smudge', name: '涂抹', sliders: [['size', '大小', 1, 300, 1], ['hard', '硬度', 0, 100, 1], ['strength', '强度', 1, 100, 1]] },
+];
+const SHAPE_KINDS = [['rect', '矩形'], ['ellipse', '椭圆'], ['polygon', '多边形'], ['star', '星形'], ['line', '直线']];
+let paintTool = 'brush';
+let shapeTool = null;               // null = 画笔类工具；否则为形状 kind
+const toolParams = {
+  brush: { size: 40, hard: 80, opacity: 100 },
+  eraser: { size: 40, hard: 80, opacity: 100 },
+  smudge: { size: 40, hard: 50, strength: 50 },
+};
+const shapeParams = { sides: 6, points: 5, ratio: 40 };
+let shapeStrokeW = 3;
+let brushHover = null;              // 原图坐标（笔尖圆圈用）
+let shapeDrag = null;               // {x0,y0,x1,y1} 原图坐标
+let strokeCtx = null;               // {stroke, ctx, img} 进行中的一笔
+const paintToolIsShape = () => !!shapeTool;
+const shapeOpt = () => ({ sides: shapeParams.sides, points: shapeParams.points, ratio: shapeParams.ratio / 100 });
+function hexToRgb(hex) { const n = parseInt(String(hex).slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function updateBrushTargetHint() {
+  const el = $('#brushTargetHint');
+  if (!el || !editor || !editor.getMaskTarget) return;
+  el.textContent = editor.getMaskTarget() != null
+    ? '当前目标：选中图层的蒙版（画笔按颜色灰度画、橡皮擦涂黑=隐藏、涂抹晕开灰度）。在图上拖动即可画，一笔算一步撤销。'
+    : '当前目标：当前图层像素。在图上拖动即可画，一笔算一步撤销。';
+}
+
+function startStroke(p, e) {
+  if (!window.MTBrush || !editor.beginPaint) { setStatus('画笔模块未就绪'); return; }
+  const info = editor.beginPaint(paintTool === 'eraser' ? '橡皮擦' : paintTool === 'smudge' ? '涂抹' : '画笔');
+  if (info === false) { setStatus('当前是调整图层，没有像素可以画（给它加蒙版并选中蒙版，或先切换到像素图层）'); return; }
+  if (!info) return;
+  const tp = toolParams[paintTool];
+  const isMask = info.target === 'mask';
+  const opts = {
+    size: tp.size, hardness: tp.hard / 100,
+    sel: (editor.selHas && editor.selHas()) ? editor.selGetMask() : null,
+  };
+  if (paintTool === 'eraser') {
+    // 橡皮作用于像素层 = destination-out（alpha *= 1−k，PhotoCraft erase 口径）；
+    // 作用于蒙版（无 alpha 的灰度面）= 涂黑（隐藏），等同 Photoshop 在蒙版上以前景黑擦
+    Object.assign(opts, isMask ? { kind: 'gray', gray: 0, opacity: tp.opacity / 100 }
+                               : { kind: 'erase', opacity: tp.opacity / 100 });
+  } else if (paintTool === 'smudge') {
+    Object.assign(opts, { kind: 'smudge', strength: tp.strength / 100 });
+  } else {
+    const fg = hexToRgb($('#inBrushColor').value);
+    // 画笔作用于蒙版：前景色取灰度（Rec.601 亮度）；作用于像素层：原色
+    Object.assign(opts, isMask ? { kind: 'gray', gray: Math.round(0.299 * fg[0] + 0.587 * fg[1] + 0.114 * fg[2]), opacity: tp.opacity / 100 }
+                               : { kind: 'paint', color: fg, opacity: tp.opacity / 100 });
+  }
+  const ctx2 = info.canvas.getContext('2d', { willReadFrequently: true });
+  const img = ctx2.getImageData(0, 0, info.w, info.h);
+  const stroke = window.MTBrush.createStroke(opts);
+  stroke.attach(img);
+  strokeCtx = { stroke, ctx: ctx2, img };
+  try { overlay.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+  stroke.start(p.x, p.y);
+  flushStroke();
+}
+function flushStroke() {
+  if (!strokeCtx) return;
+  const d = strokeCtx.stroke.dirty;
+  if (isFinite(d.x0) && d.x1 > d.x0 && d.y1 > d.y0) {
+    strokeCtx.ctx.putImageData(strokeCtx.img, 0, 0, d.x0, d.y0, d.x1 - d.x0, d.y1 - d.y0);
+    strokeCtx.stroke.clearDirty();
+    editor.paintRefresh();
+  }
+}
+function finishStroke() {
+  if (!strokeCtx) return;
+  flushStroke();
+  strokeCtx = null;
+  editor.endPaint();
+  bumpChange();
+}
+
+/* 形状松手落笔：在临时画布上按几何+填充/描边画好，经 stampCanvas 落到活动层 */
+function commitShape() {
+  const d = shapeDrag;
+  shapeDrag = null;
+  drawOverlay();
+  if (!d || !window.MTBrush) return;
+  if (shapeTool !== 'line' && (Math.abs(d.x1 - d.x0) < 2 || Math.abs(d.y1 - d.y0) < 2)) { setStatus('形状太小，没有画'); return; }
+  if (activeIsAdj()) { setStatus('当前是调整图层，没有像素可以画形状，请先切换到像素图层'); return; }
+  const sz = imgSize();
+  if (!sz) return;
+  const tmp = document.createElement('canvas');
+  tmp.width = sz.w; tmp.height = sz.h;
+  const tctx = tmp.getContext('2d');
+  const geom = window.MTBrush.shapeGeom(shapeTool, d.x0, d.y0, d.x1, d.y1, shapeOpt());
+  window.MTBrush.tracePath(tctx, geom);
+  if (geom.type === 'line') {
+    tctx.strokeStyle = $('#chkShapeStroke').checked ? $('#inShapeStroke').value : $('#inShapeFill').value;
+    tctx.lineWidth = shapeStrokeW;
+    tctx.lineCap = 'round';
+    tctx.stroke();
+  } else {
+    if ($('#chkShapeFill').checked) {
+      if ($('#chkShapeGrad').checked) { // 线性渐变沿拖拽方向（t = 投影/拖拽长度，PhotoCraft 口径）
+        const gr = tctx.createLinearGradient(d.x0, d.y0, d.x1, d.y1);
+        gr.addColorStop(0, $('#inShapeFill').value);
+        gr.addColorStop(1, $('#inShapeGrad2').value);
+        tctx.fillStyle = gr;
+      } else {
+        tctx.fillStyle = $('#inShapeFill').value;
+      }
+      tctx.fill();
+    }
+    if ($('#chkShapeStroke').checked && shapeStrokeW > 0) {
+      tctx.strokeStyle = $('#inShapeStroke').value;
+      tctx.lineWidth = shapeStrokeW;
+      tctx.stroke();
+    }
+  }
+  call(() => editor.stampCanvas(tmp, (SHAPE_KINDS.find(k => k[0] === shapeTool) || [])[1] || '形状'), '形状绘制失败').then(ok => { if (ok) afterOp('形状已绘制'); });
+}
+
+/* overlay 上的形状预览与笔尖圆圈 */
+function drawBrushOverlay(ctx, ox, oy, sx, sy, dpr) {
+  if (mode !== 'brush') return;
+  const X = v => ox + v * sx, Y = v => oy + v * sy;
+  if (shapeDrag && window.MTBrush) {
+    const geom = window.MTBrush.shapeGeom(shapeTool, shapeDrag.x0, shapeDrag.y0, shapeDrag.x1, shapeDrag.y1, shapeOpt());
+    ctx.save();
+    ctx.beginPath();
+    if (geom.type === 'rect') ctx.rect(X(geom.x), Y(geom.y), geom.w * sx, geom.h * sy);
+    else if (geom.type === 'ellipse') ctx.ellipse(X(geom.cx), Y(geom.cy), Math.max(0, geom.rx * sx), Math.max(0, geom.ry * sy), 0, 0, Math.PI * 2);
+    else if (geom.type === 'line') { ctx.moveTo(X(geom.x0), Y(geom.y0)); ctx.lineTo(X(geom.x1), Y(geom.y1)); }
+    else if (geom.type === 'poly' && geom.pts.length) {
+      ctx.moveTo(X(geom.pts[0][0]), Y(geom.pts[0][1]));
+      for (let i = 1; i < geom.pts.length; i++) ctx.lineTo(X(geom.pts[i][0]), Y(geom.pts[i][1]));
+      ctx.closePath();
+    }
+    ctx.fillStyle = 'rgba(77,163,255,0.30)';
+    ctx.fill();
+    ctx.strokeStyle = '#4da3ff';
+    ctx.lineWidth = 1.6 * dpr;
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  if (brushHover && !paintToolIsShape()) {
+    const r = toolParams[paintTool].size / 2 * sx;
+    const cxp = X(brushHover.x), cyp = Y(brushHover.y);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+    ctx.lineWidth = 1.8 * dpr;
+    ctx.beginPath(); ctx.arc(cxp, cyp, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 1 * dpr;
+    ctx.beginPath(); ctx.arc(cxp, cyp, Math.max(0, r - 1.2 * dpr), 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+(function buildBrushUI() {
+  const toolsBox = $('#brushTools'), shapeBox = $('#shapeTools');
+  if (!toolsBox || !shapeBox || !editor) return;
+  const markTools = () => {
+    $$('#brushTools .cell-btn').forEach(b => b.classList.toggle('active', !shapeTool && b.dataset.ptool === paintTool));
+    $$('#shapeTools .cell-btn').forEach(b => b.classList.toggle('active', shapeTool === b.dataset.shape));
+  };
+  const rebuildSliders = () => {
+    const box = $('#brushSliders');
+    box.innerHTML = '';
+    const def = PAINT_TOOLS.find(t => t.id === paintTool);
+    for (const [key, label, mn, mx, st] of def.sliders) {
+      box.appendChild(sliderRowEl(label, mn, mx, st, toolParams[paintTool][key], v => { toolParams[paintTool][key] = v; }));
+    }
+    $('#brushColorField').style.display = paintTool === 'brush' ? '' : 'none';
+    const sbox = $('#shapeSliders');
+    sbox.innerHTML = '';
+    if (shapeTool === 'polygon') sbox.appendChild(sliderRowEl('边数', 3, 12, 1, shapeParams.sides, v => { shapeParams.sides = v; }));
+    if (shapeTool === 'star') {
+      sbox.appendChild(sliderRowEl('角数', 3, 16, 1, shapeParams.points, v => { shapeParams.points = v; }));
+      sbox.appendChild(sliderRowEl('内径比 %', 5, 95, 1, shapeParams.ratio, v => { shapeParams.ratio = v; }));
+    }
+  };
+  for (const t of PAINT_TOOLS) {
+    const b = document.createElement('button');
+    b.className = 'cell-btn';
+    b.textContent = t.name;
+    b.dataset.ptool = t.id;
+    b.addEventListener('click', () => {
+      paintTool = t.id; shapeTool = null;
+      markTools(); rebuildSliders(); updateBrushTargetHint();
+      if (hasImg()) setMode('brush');
+    });
+    toolsBox.appendChild(b);
+  }
+  for (const [id, name] of SHAPE_KINDS) {
+    const b = document.createElement('button');
+    b.className = 'cell-btn';
+    b.textContent = name;
+    b.dataset.shape = id;
+    b.addEventListener('click', () => {
+      shapeTool = id;
+      markTools(); rebuildSliders();
+      if (hasImg()) setMode('brush');
+    });
+    shapeBox.appendChild(b);
+  }
+  $('#shapeStrokeBox').appendChild(sliderRowEl('描边宽', 1, 40, 1, shapeStrokeW, v => { shapeStrokeW = v; }));
+  markTools();
+  rebuildSliders();
+})();
+
+/* ---------------- 选区页 ---------------- */
+let selTool = 'rect';
+let wandTol = 32;
+(function buildSelectUI() {
+  const tools = $$('#selTools .sel-tool');
+  if (!tools.length || !editor) return;
+  tools.forEach(b => b.addEventListener('click', () => {
+    selTool = b.dataset.seltool;
+    tools.forEach(x => x.classList.toggle('active', x === b));
+    if (hasImg()) setMode('select');
+  }));
+  $('#wandTolBox').appendChild(sliderRowEl('魔棒容差', 0, 255, 1, wandTol, v => { wandTol = v; }));
+  let featherR = 5;
+  $('#selFeatherBox').appendChild(sliderRowEl('羽化半径', 0, 100, 1, featherR, v => { featherR = v; }));
+  const needImg = () => { if (!hasImg()) { setStatus('先打开一张图片'); return false; } return true; };
+  const needSel = () => {
+    if (!needImg()) return false;
+    if (!editor.selHas || !editor.selHas()) { setStatus('还没有选区，先用选区工具在图上选一块'); return false; }
+    return true;
+  };
+  const selOp = (fn, label) => { if (needSel()) call(fn, '选区操作失败').then(ok => { if (ok) setStatus(label); }); };
+  $('#btnSelAll').addEventListener('click', () => { if (needImg()) call(() => editor.selAll(), '全选失败').then(ok => { if (ok) setStatus('已全选'); }); });
+  $('#btnSelInvert').addEventListener('click', () => selOp(() => editor.selInvert(), '已反选'));
+  $('#btnSelNone').addEventListener('click', () => { if (needImg()) call(() => editor.selNone(), '取消选区失败').then(ok => { if (ok) setStatus('已取消选区'); }); });
+  $('#btnSelFeather').addEventListener('click', () => selOp(() => editor.selFeather(featherR), '已羽化 ' + featherR + ' px'));
+  $('#btnSelExpand').addEventListener('click', () => {
+    const n = parseInt($('#inSelMorph').value, 10);
+    if (n > 0) selOp(() => editor.selExpand(n), '选区已扩展 ' + n + ' px'); else setStatus('先填扩展像素数');
+  });
+  $('#btnSelContract').addEventListener('click', () => {
+    const n = parseInt($('#inSelMorph').value, 10);
+    if (n > 0) selOp(() => editor.selContract(n), '选区已收缩 ' + n + ' px'); else setStatus('先填收缩像素数');
+  });
+  $('#btnSelDelete').addEventListener('click', async () => {
+    if (!needSel()) return;
+    if (activeIsAdj()) { setStatus('当前是调整图层，没有像素内容可以删除'); return; }
+    if (await call(() => editor.selDeleteContent(), '删除失败')) afterOp('已删除选区内容');
+  });
+  $('#btnSelFill').addEventListener('click', async () => {
+    if (!needSel()) return;
+    if (activeIsAdj()) { setStatus('当前是调整图层，没有像素可以填充'); return; }
+    const hex = $('#inSelFillColor').value || '#000000';
+    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    if (await call(() => editor.selFill(r, g, b), '填充失败')) afterOp('已填充选区');
+  });
+  // 选区状态行 + 选区变化时重画蚂蚁线（rev 变了才重画）
+  let lastSelRev = -1;
+  try {
+    editor.on('state', s => {
+      const sel = s && s.selection;
+      const el = $('#selStat');
+      if (el) el.textContent = sel && sel.active ? '当前选区：约 ' + sel.count.toLocaleString() + ' 个像素（含部分覆盖的边缘）' : '无选区';
+      const rev = sel ? sel.rev : -1;
+      if (rev !== lastSelRev) { lastSelRev = rev; drawOverlay(); }
+    });
+  } catch (e) { /* 忽略 */ }
 })();
 
 /* ---------------- 几何 ---------------- */
@@ -950,7 +2457,8 @@ $('#inQuality').addEventListener('input', () => {
 });
 syncQualityRow();
 
-async function doExport(format, quality) {
+async function doExport(format, quality, opts) {
+  opts = opts || {};
   if (!editor) { setStatus('编辑引擎未就绪'); return; }
   if (!hasImg()) { setStatus('先打开一张图片'); return; }
   setStatus('正在导出…');
@@ -958,15 +2466,19 @@ async function doExport(format, quality) {
   $('#busy').hidden = false;
   await new Promise(r => setTimeout(r, 60)); // 先让忙碌态画出来，大图导出是同步重活
   let blob = null;
-  try { blob = await editor.exportBlob({ format: format, quality: quality }); }
+  try { blob = await editor.exportBlob({ format: format, quality: quality, scaleTo: opts.scaleTo || null }); }
   catch (e) { $('#busy').hidden = true; setStatus('导出失败：' + (e && e.message ? e.message : '未知错误')); return; }
   $('#busy').hidden = true;
   if (!blob) { setStatus('导出失败：没有生成文件'); return; }
   exportedCounter = changeCounter;
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
-  const name = 'meowtu-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' +
+  let name = 'meowtu-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' +
                pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + '.' + fmtExt(format);
+  if (opts.name) { // 对话框给的文件名：去掉路径与旧扩展名，按格式补扩展名
+    const base = String(opts.name).replace(/[\\/:*?"<>|]/g, '').replace(/\.[a-z0-9]+$/i, '').trim();
+    if (base) name = base + '.' + fmtExt(format);
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -982,6 +2494,209 @@ $('#btnExport').addEventListener('click', () => {
   doExport(lastExport.format, lastExport.quality);
 });
 $('#btnSave').addEventListener('click', () => doExport(lastExport.format, lastExport.quality));
+
+/* ---------------- 保存工程（.meowtu：完整图层文档 JSON 下载） ---------------- */
+function saveProject() {
+  if (!editor) { setStatus('编辑引擎未就绪'); return; }
+  if (!hasImg()) { setStatus('先打开一张图片'); return; }
+  const proj = editor.exportProject();
+  if (!proj) { setStatus('保存工程失败'); return; }
+  const json = JSON.stringify(proj);
+  const name = expDefaultName() + '.meowtu';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  // 大图防呆：估算体积过大只提示、不阻断
+  if (json.length > 80 * 1024 * 1024) {
+    setStatus('工程文件较大（约 ' + (json.length / 1048576).toFixed(0) + ' MB），已保存为 ' + name);
+  } else {
+    setStatus('已保存工程 ' + name);
+  }
+}
+$('#btnSaveProject').addEventListener('click', saveProject);
+
+/* ---------------- 修图配方（.meowtu-recipe：只存层状态不存像素） ---------------- */
+function downloadBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function fileToCanvas(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      c.getContext('2d').drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      resolve(c);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
+    img.src = url;
+  });
+}
+async function readRecipeFile(file) {
+  let obj = null;
+  try { obj = JSON.parse(await file.text()); } catch (e) { /* 下面统一报损坏 */ }
+  if (!obj || obj.format !== window.MT.recipe.format) throw new Error('这不是喵图配方文件');
+  if (obj.version !== window.MT.recipe.version) throw new Error('配方文件版本不受支持（版本 ' + obj.version + '）');
+  if (!Array.isArray(obj.layers) || !obj.layers.length) throw new Error('配方文件已损坏，无法打开');
+  return obj;
+}
+$('#btnRecipeSave').addEventListener('click', () => {
+  if (!editor) { setStatus('编辑引擎未就绪'); return; }
+  if (!hasImg()) { setStatus('先打开一张图片'); return; }
+  const recipe = editor.exportRecipe();
+  if (!recipe) { setStatus('保存配方失败'); return; }
+  const name = expDefaultName() + '.meowtu-recipe';
+  downloadBlob(new Blob([JSON.stringify(recipe)], { type: 'application/json' }), name);
+  setStatus('已保存配方 ' + name + '（共 ' + recipe.layers.length + ' 层状态）');
+});
+let recipeInputMode = 'apply';   // 'apply' 套到当前图 | 'batch' 先收配方再选图
+let batchRecipe = null;
+$('#btnRecipeApply').addEventListener('click', () => {
+  if (!hasImg()) { setStatus('先打开一张图片'); return; }
+  recipeInputMode = 'apply';
+  $('#recipeInput').click();
+});
+$('#btnRecipeBatch').addEventListener('click', () => {
+  if (batchRecipe) { $('#batchInput').click(); return; }
+  recipeInputMode = 'batch';
+  setStatus('先选一个配方文件，再选要批量处理的图片');
+  $('#recipeInput').click();
+});
+$('#recipeInput').addEventListener('change', async e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  let recipe = null;
+  try { recipe = await readRecipeFile(f); }
+  catch (err) { setStatus('配方打开失败：' + (err && err.message ? err.message : '文件无效')); return; }
+  if (recipeInputMode === 'batch') {
+    if (recipe.layers.length !== 1) {
+      setStatus('批量套用只支持单层配方，这个配方有 ' + recipe.layers.length + ' 层，已取消');
+      return;
+    }
+    batchRecipe = recipe;
+    $('#recipeInfo').textContent = '已载入配方：' + f.name + '（单层），点「批量套用」可继续换图。';
+    setStatus('配方已载入，再选要批量处理的图片');
+    $('#batchInput').click();
+    return;
+  }
+  const ok = await call(() => editor.applyRecipe(recipe), '应用配方失败');
+  if (ok) {
+    bumpChange();
+    const metas = editor.getLayers();
+    setStatus('已应用配方（套了 ' + Math.min(recipe.layers.length, metas.length) + ' 层' +
+      (recipe.layers.length > metas.length ? '；配方共 ' + recipe.layers.length + ' 层，多出的已忽略' : '') + '）');
+    refresh();
+  }
+});
+$('#batchInput').addEventListener('change', async e => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if (!files.length || !batchRecipe) return;
+  let done = 0;
+  for (const f of files) {
+    setStatus('批量处理中 ' + (done + 1) + '/' + files.length + '：' + f.name);
+    try {
+      const cv = await fileToCanvas(f);
+      const ed2 = window.MT.createEditor(document.createElement('canvas'));
+      ed2.loadCanvas(cv);
+      ed2.applyRecipe(batchRecipe);
+      const blob = await ed2.exportBlob({ format: 'png' });
+      downloadBlob(blob, f.name.replace(/\.[^.]+$/, '') + '-配方.png');
+      done++;
+    } catch (err) { /* 单张失败不中断其余 */ }
+    await new Promise(r => setTimeout(r, 120));
+  }
+  setStatus(done ? '批量完成：已导出 ' + done + ' 张（文件名带 -配方 后缀）' : '批量失败：一张都没处理成功');
+});
+
+/* ---------------- 导出对话框（构成参考 PhotoCraft Export As：格式/质量/
+   尺寸（比例或指定宽度）/文件名/体积预估；预估按当前设置真实编码一次，
+   设置变化防抖重估。对话框导出会更新 lastExport，Ctrl+S 快速保存随之走） ---------------- */
+let expTimer = null;
+function expTargetSize() {
+  const s = imgSize();
+  if (!s) return null;
+  const mode = $('#expScale').value;
+  if (mode === 'width') {
+    const w = Math.max(1, parseInt($('#expWidth').value, 10) || s.w);
+    return { w: w, h: Math.max(1, Math.round(s.h * w / s.w)) };
+  }
+  const f = parseFloat(mode) || 1;
+  return { w: Math.max(1, Math.round(s.w * f)), h: Math.max(1, Math.round(s.h * f)) };
+}
+function expSyncRows() {
+  $('#expQualityRow').style.display = $('#expFormat').value === 'png' ? 'none' : 'flex';
+  $('#expWidthRow').hidden = $('#expScale').value !== 'width';
+  const t = expTargetSize();
+  $('#expSizeInfo').textContent = t ? '输出尺寸：' + t.w + ' × ' + t.h : '';
+}
+async function expEstimate() {
+  const el = $('#expEstimate');
+  if (!hasImg() || !editor) { el.textContent = '预估体积：—'; return; }
+  const format = $('#expFormat').value;
+  const quality = parseInt($('#expQuality').value, 10) / 100;
+  const t = expTargetSize();
+  el.textContent = '预估体积：计算中…';
+  try {
+    const blob = await editor.exportBlob({ format: format, quality: quality, scaleTo: t });
+    if ($('#exportDlg').hidden) return;
+    el.textContent = '预估体积：约 ' + (blob.size >= 1048576
+      ? (blob.size / 1048576).toFixed(2) + ' MB' : (blob.size / 1024).toFixed(1) + ' KB');
+  } catch (e) { el.textContent = '预估体积：计算失败'; }
+}
+function expSchedule() { clearTimeout(expTimer); expTimer = setTimeout(expEstimate, 250); }
+function expDefaultName() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return 'meowtu-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' +
+         pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+}
+function openExportDlg() {
+  if (!hasImg()) { setStatus('先打开一张图片'); return; }
+  $('#expFormat').value = lastExport.format;
+  $('#expQuality').value = Math.round(lastExport.quality * 100);
+  $('#expQualityVal').textContent = $('#expQuality').value;
+  $('#expScale').value = '1';
+  $('#expName').value = expDefaultName();
+  expSyncRows();
+  $('#exportDlg').hidden = false;
+  expEstimate();
+}
+$('#btnExportDlg').addEventListener('click', openExportDlg);
+$('#expCancel').addEventListener('click', () => { $('#exportDlg').hidden = true; });
+$('#exportDlg').addEventListener('click', e => { if (e.target === $('#exportDlg')) $('#exportDlg').hidden = true; });
+$('#expFormat').addEventListener('change', () => { expSyncRows(); expSchedule(); });
+$('#expScale').addEventListener('change', () => { expSyncRows(); expSchedule(); });
+$('#expWidth').addEventListener('input', () => { expSyncRows(); expSchedule(); });
+$('#expQuality').addEventListener('input', () => {
+  $('#expQualityVal').textContent = $('#expQuality').value;
+  expSchedule();
+});
+$('#expOk').addEventListener('click', () => {
+  const format = $('#expFormat').value;
+  const quality = parseInt($('#expQuality').value, 10) / 100;
+  const t = expTargetSize();
+  const name = $('#expName').value;
+  lastExport.format = format;
+  lastExport.quality = quality;
+  $('#selFormat').value = format;
+  syncQualityRow();
+  $('#exportDlg').hidden = true;
+  doExport(format, quality, { name: name, scaleTo: t });
+});
 
 /* ---------------- 对比：按住看原图 ---------------- */
 const compareView = $('#compareView');
@@ -1008,12 +2723,30 @@ document.addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (k === 'z' && !e.shiftKey) { e.preventDefault(); $('#btnUndo').click(); }
   else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); $('#btnRedo').click(); }
+  else if (k === 'a' && hasImg() && editor && editor.selAll) { e.preventDefault(); editor.selAll(); setStatus('已全选'); }
+  else if (k === 'd' && hasImg() && editor && editor.selNone) { e.preventDefault(); editor.selNone(); setStatus('已取消选区'); }
+  else if (k === 'i' && e.shiftKey && hasImg() && editor && editor.selInvert) { e.preventDefault(); editor.selInvert(); setStatus('已反选'); }
   else if (k === 'o') { e.preventDefault(); fileInput.click(); }
   else if (k === 's') { e.preventDefault(); doExport(lastExport.format, lastExport.quality); }
+  else if (k === 't' && hasImg()) { e.preventDefault(); enterTransformMode(); }
+});
+/* 自由变换模式的确认/取消键（输入框聚焦时不触发） */
+document.addEventListener('keydown', e => {
+  if (mode !== 'transform') return;
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
+  if (e.key === 'Enter') { e.preventDefault(); exitTransform(true); }
+  else if (e.key === 'Escape') { e.preventDefault(); exitTransform(false); setStatus('已取消自由变换'); }
 });
 
 /* ---------------- 容错：模块未就绪时隐藏 ---------------- */
 (function hideMissingModules() {
+  if (!(window.MTSelection && typeof window.MTSelection.wand === 'function')) {
+    const tab = $('.tab[data-tab="select"]'), page = $('.page[data-page="select"]');
+    if (tab) tab.hidden = true;
+    if (page) page.hidden = true;
+    if (currentTab === 'select') switchTab('adjust');
+  }
   if (!(window.MTGrabCut && typeof window.MTGrabCut.cut === 'function')) {
     const tab = $('.tab[data-tab="cutout"]'), page = $('.page[data-page="cutout"]');
     const tool = $('.tool[data-tool="cutout"]');
