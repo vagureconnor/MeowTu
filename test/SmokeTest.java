@@ -115,6 +115,33 @@ public class SmokeTest {
         check(alpha[48 * 96 + 48] > 200, "GrabCut 圆心为前景（" + ms + "ms）");
         check(alpha[2 * 96 + 2] < 55, "GrabCut 远角为背景");
 
+        // ---- 编辑引擎新模型（数值常驻 + 检查点撤销，与网页版同语义） ----
+        meowtu.Editor ed = new meowtu.Editor();
+        BufferedImage eimg = testImage(120, 90);
+        ed.setFreshImage(eimg);
+        check(!ed.canUndo(), "引擎：载入后无历史");
+        ed.params().brightness = 50;
+        check(ed.base() == eimg && !ed.canUndo(), "引擎：拖滑杆不烘焙不入栈（数值常驻）");
+        check(changed(eimg, ed.bakeCurrent()), "引擎：常驻参数实时体现在合成结果");
+        check(ed.checkpointAdjust() && ed.canUndo(), "引擎：松手记检查点入撤销栈");
+        check(!ed.checkpointAdjust(), "引擎：无变化时不重复记检查点");
+        ed.params().brightness = -30;
+        ed.checkpointAdjust();
+        check(ed.undo() && ed.params().brightness == 50, "引擎：撤销恢复上一步参数值");
+        check(ed.undo() && ed.params().isIdentity(), "引擎：再撤销回到零参数");
+        check(ed.redo() && ed.params().brightness == 50, "引擎：重做恢复参数值");
+        ed.curves().setPoints(Curves.RGB, List.of(new Point(0, 0), new Point(128, 180), new Point(255, 255)));
+        ed.checkpointAdjust();
+        check(ed.undo() && ed.curves().isIdentity(), "引擎：撤销恢复曲线为恒等");
+        ed.params().contrast = 40;
+        BufferedImage flipped = Geometry.flipH(ed.bakeCurrent());
+        ed.commitImage(flipped);
+        check(ed.params().isIdentity() && ed.base() == flipped, "引擎：离散操作提交后参数归零");
+        check(ed.undo() && ed.params().contrast == 40 && ed.base() == eimg, "引擎：撤销离散操作连参数一起恢复");
+        ed.texts().add(new meowtu.TextObject("喵", 5, 5));
+        check(ed.commitTexts() && ed.texts().isEmpty(), "引擎：栅格化文字后列表清空");
+        check(ed.undo() && ed.texts().size() == 1, "引擎：撤销后文字对象回来");
+
         System.out.println("SMOKE_ALL_PASS 共 " + passed + " 项");
     }
 }

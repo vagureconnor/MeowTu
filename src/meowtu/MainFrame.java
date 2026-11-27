@@ -13,14 +13,11 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.InputStream;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 
 /**
  * 主窗口：左工具栏（LOGO+文件/历史/对比快捷操作）｜中央画布｜右侧标签页面板｜底状态栏。
- * 持有当前图、原图、撤销/重做栈、文字对象与各编辑会话（调节/曲线/滤镜预览）。
+ * 编辑状态（底图/常驻调节参数/曲线/文字/完整状态历史）由 Editor 持有，本类负责布局与 UI 同步。
  */
 public class MainFrame extends JFrame {
     private static final long serialVersionUID = 1L;
@@ -37,20 +34,9 @@ public class MainFrame extends JFrame {
     private final JButton undoBtn = new JButton("撤销", FlatIcons.undo(16));
     private final JButton redoBtn = new JButton("重做", FlatIcons.redo(16));
 
-    private BufferedImage baseImage;
+    private final Editor editor = new Editor();
     private BufferedImage originalImage;
     private String fileName = "";
-    private final Deque<BufferedImage> undoStack = new ArrayDeque<>();
-    private final Deque<BufferedImage> redoStack = new ArrayDeque<>();
-    private static final int HISTORY_MAX = 20;
-
-    private final List<TextObject> textObjects = new ArrayList<>();
-    private final Curves curves = new Curves();
-
-    // 编辑会话（预览基于会话开始时的图，提交时全图应用）
-    private BufferedImage adjustBase, adjustPreviewSrc;
-    private BufferedImage curvesBase, curvesPreviewSrc;
-    private BufferedImage filterPreviewSrc;
 
     private AdjustPanel adjustPanel;
     private CurvesPanel curvesPanel;
@@ -87,7 +73,7 @@ public class MainFrame extends JFrame {
                 setStatus("已点选 " + canvas.getPerspectivePoints().size() + " / 4 个透视点");
             }
         });
-        canvas.setTextObjects(textObjects);
+        canvas.setTextObjects(editor.texts());
         updateHistoryButtons();
     }
 
@@ -304,11 +290,14 @@ public class MainFrame extends JFrame {
     }
 
     // ---------- 供面板调用的接口 ----------
-    public boolean hasImage() { return baseImage != null; }
-    public BufferedImage baseImage() { return baseImage; }
+    public boolean hasImage() { return editor.hasImage(); }
+    public BufferedImage baseImage() { return editor.base(); }
     public CanvasPanel canvas() { return canvas; }
-    public Curves curves() { return curves; }
-    public List<TextObject> textObjects() { return textObjects; }
+    public Curves curves() { return editor.curves(); }
+    public List<TextObject> textObjects() { return editor.texts(); }
+    public AdjustParams adjustParams() { return editor.params(); }
+    /** 当前完整效果（底图+调节+曲线+文字）的全分辨率合成，离散操作以此为输入。 */
+    public BufferedImage bakeCurrent() { return editor.bakeCurrent(); }
 
     public void setStatus(String s) { statusLabel.setText(s); }
 
@@ -330,145 +319,113 @@ public class MainFrame extends JFrame {
         }
     }
 
-    /** 通用提交：把结果图设为当前图并入撤销栈。 */
+    /** 通用提交：把结果图设为当前图并入撤销栈（待生效的调节/曲线/文字已包含在结果里，随之归零）。 */
     public void applyCommitted(BufferedImage img, String label) {
-        commitImage(img);
+        editor.commitImage(img);
+        afterStateChange(false);
         setStatus(label + " 已应用");
     }
 
+    /** 重新显示当前状态（标签页切换时调用：取消滤镜预览，回到常驻状态的合成显示）。 */
     public void clearPreview() {
-        adjustBase = null; curvesBase = null;
-        if (baseImage != null) canvas.setImage(baseImage);
+        refreshView();
     }
 
-    // 调节会话
-    public void previewAdjust(AdjustParams p) {
-        if (baseImage == null) return;
-        if (adjustBase == null) {
-            adjustBase = baseImage;
-            adjustPreviewSrc = Img.downscale(baseImage, 1100);
-        }
-        canvas.setImage(LutEngine.apply(adjustPreviewSrc, p));
-    }
-
-    public boolean commitAdjust(AdjustParams p) {
-        if (baseImage == null) return false;
-        if (adjustBase == null) adjustBase = baseImage;
-        BufferedImage src = adjustBase;
-        adjustBase = null; adjustPreviewSrc = null;
-        if (p.isIdentity()) { canvas.setImage(baseImage); return false; }
-        commitImage(LutEngine.apply(src, p));
-        setStatus("调节已应用");
-        return true;
-    }
-
-    // 曲线会话
-    public void previewCurves() {
-        if (baseImage == null) return;
-        if (curvesBase == null) {
-            curvesBase = baseImage;
-            curvesPreviewSrc = Img.downscale(baseImage, 1100);
-        }
-        canvas.setImage(curves.apply(curvesPreviewSrc));
-    }
-
-    public void commitCurves() {
-        if (baseImage == null) return;
-        if (curvesBase == null) curvesBase = baseImage;
-        BufferedImage src = curvesBase;
-        curvesBase = null; curvesPreviewSrc = null;
-        if (curves.isIdentity()) { canvas.setImage(baseImage); return; }
-        BufferedImage img = curves.apply(src);
-        curves.reset();
-        curvesPanel.repaint();
-        commitImage(img);
-        setStatus("曲线已应用");
-    }
-
-    // 滤镜会话
+    /** 滤镜预览：把滤镜作用在当前效果（底图+调节+曲线）的预览图上，不改变任何状态。 */
     public void previewFilter(String id, double strength) {
-        if (baseImage == null) return;
-        if (filterPreviewSrc == null) filterPreviewSrc = Img.downscale(baseImage, 1100);
-        canvas.setImage(Filters.apply(id, filterPreviewSrc, strength));
+        if (!editor.hasImage()) return;
+        canvas.setImage(Filters.apply(id, editor.renderPreview(), strength));
     }
 
     public void commitFilter(String id, double strength) {
-        if (baseImage == null) return;
-        commitImage(Filters.apply(id, baseImage, strength));
+        if (!editor.hasImage()) return;
+        editor.commitImage(Filters.apply(id, editor.bakeCurrent(), strength));
+        afterStateChange(false);
         setStatus("滤镜已应用");
     }
 
-    /** 把文字对象画到当前图上并提交（对象列表随之清空）。 */
+    /** 把文字对象连同当前调节/曲线一起烘焙进底图并提交（对象列表随之清空）。 */
     public void rasterizeTexts() {
-        if (baseImage == null || textObjects.isEmpty()) { setStatus("没有可栅格化的文字"); return; }
-        BufferedImage comp = composite();
-        textObjects.clear();
-        textPanel.refreshList();
-        commitImage(comp);
+        if (!editor.hasImage() || editor.texts().isEmpty()) { setStatus("没有可栅格化的文字"); return; }
+        editor.commitTexts();
+        afterStateChange(false);
         setStatus("文字已栅格化到图像");
     }
 
-    /** 当前图 + 文字对象的合成图（不改状态），保存/导出用。 */
+    /** 当前完整效果的合成图（底图+调节+曲线+文字），保存/导出用。 */
     public BufferedImage composite() {
-        if (baseImage == null) return null;
-        if (textObjects.isEmpty()) return baseImage;
-        BufferedImage comp = Img.copy(baseImage);
-        Graphics2D g = comp.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        for (TextObject t : textObjects) t.render(g);
-        g.dispose();
-        return comp;
+        return editor.bakeCurrent();
     }
 
-    // ---------- 历史 ----------
-    private void commitImage(BufferedImage img) {
-        if (baseImage != null) {
-            undoStack.push(baseImage);
-            while (undoStack.size() > HISTORY_MAX) undoStack.removeLast();
-        }
-        redoStack.clear();
-        baseImage = img;
-        afterImageChange(false);
-    }
-
+    // ---------- 历史与视图同步 ----------
     public void undo() {
-        if (undoStack.isEmpty()) return;
-        redoStack.push(baseImage);
-        baseImage = undoStack.pop();
-        afterImageChange(false);
+        if (!editor.undo()) return;
+        afterStateChange(false);
         setStatus("已撤销");
     }
 
     public void redo() {
-        if (redoStack.isEmpty()) return;
-        undoStack.push(baseImage);
-        baseImage = redoStack.pop();
-        afterImageChange(false);
+        if (!editor.redo()) return;
+        afterStateChange(false);
         setStatus("已重做");
     }
 
     private void updateHistoryButtons() {
-        undoBtn.setEnabled(!undoStack.isEmpty());
-        redoBtn.setEnabled(!redoStack.isEmpty());
+        undoBtn.setEnabled(editor.canUndo());
+        redoBtn.setEnabled(editor.canRedo());
     }
 
-    private void afterImageChange(boolean fit) {
-        adjustBase = null; curvesBase = null; filterPreviewSrc = null;
-        canvas.setOverlayImage(null);
-        canvas.setImage(baseImage);
+    /** 按引擎当前状态重画画布（管线合成图）+ 直方图 + 历史按钮 + 信息栏。滑杆/曲线拖动时高频调用。 */
+    public void refreshView() {
+        if (!editor.hasImage()) {
+            canvas.setImage(null);
+            updateHistoryButtons();
+            updateInfo();
+            return;
+        }
+        BufferedImage view = editor.renderView();
+        canvas.setImage(view);
+        canvas.setCoordSize(editor.base().getWidth(), editor.base().getHeight());
         canvas.setOriginal(originalImage);
-        if (fit) canvas.fitZoom();
-        histogramPanel.refresh(baseImage);
-        filtersPanel.refreshThumbs(false);
+        histogramPanel.refresh(view);
         updateHistoryButtons();
         updateInfo();
     }
 
+    /** 引擎状态被离散操作/撤销/重做/载入改变后：同步全部 UI（滑杆、曲线、文字列表、滤镜缩略图）。 */
+    private void afterStateChange(boolean fit) {
+        canvas.setOverlayImage(null);
+        syncUIFromEngine();
+        filtersPanel.refreshThumbs(false);
+        if (fit) canvas.fitZoom();
+    }
+
+    /** 把引擎里的参数/曲线/文字回填到各面板——撤销后滑杆数值、曲线点、文字能原样回来靠这里。 */
+    private void syncUIFromEngine() {
+        adjustPanel.syncFromParams(editor.params());
+        curvesPanel.refreshFromEngine();
+        textPanel.refreshList();
+        refreshView();
+    }
+
+    /** 调节检查点（滑杆松手/曲线拖完/重置时调用）：把上个安定状态记入撤销栈。 */
+    public void checkpoint() {
+        if (editor.checkpointAdjust()) updateHistoryButtons();
+    }
+
+    /** 重置全部待生效调节（参数+曲线归零）；重置本身记检查点，可撤销回来。 */
+    public void resetAllAdjustments() {
+        if (!editor.hasImage()) return;
+        editor.resetAdjust();
+        syncUIFromEngine();
+        checkpoint();
+        setStatus("已重置全部调节（可撤销恢复）");
+    }
+
     private void updateInfo() {
-        if (baseImage == null) { infoLabel.setText(""); return; }
+        if (!editor.hasImage()) { infoLabel.setText(""); return; }
         infoLabel.setText(String.format("%s · %d×%d · 缩放 %.0f%%",
-                fileName, baseImage.getWidth(), baseImage.getHeight(), canvas.getZoom() * 100));
+                fileName, editor.base().getWidth(), editor.base().getHeight(), canvas.getZoom() * 100));
     }
 
     // ---------- 文件操作 ----------
@@ -479,17 +436,13 @@ public class MainFrame extends JFrame {
         File f = fc.getSelectedFile();
         try {
             BufferedImage img = Formats.load(f);
-            baseImage = img;
+            editor.setFreshImage(img);
             originalImage = img;
             fileName = f.getName();
-            undoStack.clear(); redoStack.clear();
-            textObjects.clear();
-            textPanel.refreshList();
             canvas.clearCrop();
             canvas.clearCutout();
             canvas.clearPerspective();
-            curves.reset();
-            afterImageChange(true);
+            afterStateChange(true);
             setStatus("已打开 " + f.getName());
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "打开失败：" + ex.getMessage(), "喵图", JOptionPane.ERROR_MESSAGE);
@@ -497,7 +450,7 @@ public class MainFrame extends JFrame {
     }
 
     private void saveFile() {
-        if (baseImage == null) { setStatus("先打开一张图片"); return; }
+        if (!editor.hasImage()) { setStatus("先打开一张图片"); return; }
         JFileChooser fc = new JFileChooser();
         fc.setSelectedFile(new File(fileName.isEmpty() ? "meowtu.png" : fileName));
         if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
@@ -518,7 +471,7 @@ public class MainFrame extends JFrame {
     }
 
     private void exportFile() {
-        if (baseImage == null) { setStatus("先打开一张图片"); return; }
+        if (!editor.hasImage()) { setStatus("先打开一张图片"); return; }
         JPanel p = new JPanel(new GridLayout(3, 2, 6, 6));
         JComboBox<String> fmtBox = new JComboBox<>(Formats.SAVE_FORMATS);
         JSlider q = new JSlider(10, 100, 92);
@@ -564,13 +517,10 @@ public class MainFrame extends JFrame {
         g.fillOval(80, 90, 150, 44);
         g.fillOval(150, 70, 110, 40);
         g.dispose();
-        baseImage = img;
+        editor.setFreshImage(img);
         originalImage = img;
         fileName = "示例图.png";
-        undoStack.clear(); redoStack.clear();
-        textObjects.clear();
-        textPanel.refreshList();
-        afterImageChange(true);
+        afterStateChange(true);
         setStatus("示例图已生成，可以开始试用各功能");
     }
 }

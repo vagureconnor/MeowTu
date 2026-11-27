@@ -29,15 +29,15 @@ public class GeometryPanel extends JPanel {
         body.add(FlatWidgets.section("旋转与翻转"));
         JPanel rotRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
         rotRow.setOpaque(false);
-        rotRow.add(btn("左旋 90°", () -> apply(Geometry.rotate90(frame.baseImage(), false), "左旋90°")));
-        rotRow.add(btn("右旋 90°", () -> apply(Geometry.rotate90(frame.baseImage(), true), "右旋90°")));
-        rotRow.add(btn("水平翻转", () -> apply(Geometry.flipH(frame.baseImage()), "水平翻转")));
-        rotRow.add(btn("垂直翻转", () -> apply(Geometry.flipV(frame.baseImage()), "垂直翻转")));
+        rotRow.add(btn("左旋 90°", () -> apply(Geometry.rotate90(frame.bakeCurrent(), false), "左旋90°")));
+        rotRow.add(btn("右旋 90°", () -> apply(Geometry.rotate90(frame.bakeCurrent(), true), "右旋90°")));
+        rotRow.add(btn("水平翻转", () -> apply(Geometry.flipH(frame.bakeCurrent()), "水平翻转")));
+        rotRow.add(btn("垂直翻转", () -> apply(Geometry.flipV(frame.bakeCurrent()), "垂直翻转")));
         body.add(rotRow);
         angleRow = new FlatWidgets.SliderRow("角度", -180, 180, 0, 1);
         body.add(angleRow);
         body.add(leftRow(btn("应用任意角度旋转", () -> {
-            if (angleRow.value() != 0) apply(Geometry.rotate(frame.baseImage(), angleRow.value()), "旋转");
+            if (angleRow.value() != 0) apply(Geometry.rotate(frame.bakeCurrent(), angleRow.value()), "旋转");
         })));
 
         body.add(FlatWidgets.section("裁剪"));
@@ -57,7 +57,7 @@ public class GeometryPanel extends JPanel {
         cropBtns.add(btn("应用裁剪", () -> {
             Rectangle r = frame.canvas().getCropRect();
             if (r == null) { frame.setStatus("还没有裁剪框：先在画布上拖出选框"); return; }
-            apply(Geometry.crop(frame.baseImage(), r), "裁剪");
+            apply(Geometry.crop(frame.bakeCurrent(), r), "裁剪");
             frame.canvas().clearCrop();
         }));
         cropBtns.add(btn("取消选框", () -> frame.canvas().clearCrop()));
@@ -76,7 +76,7 @@ public class GeometryPanel extends JPanel {
             if (pts.size() != 4) { frame.setStatus("透视点不足 4 个（当前 " + pts.size() + " 个）"); return; }
             Point2D[] quad = new Point2D[4];
             for (int i = 0; i < 4; i++) quad[i] = new Point2D.Double(pts.get(i).x, pts.get(i).y);
-            apply(Geometry.perspective(frame.baseImage(), quad), "透视矫正");
+            apply(Geometry.perspective(frame.bakeCurrent(), quad), "透视矫正");
             frame.canvas().clearPerspective();
         }));
         perspRow.add(btn("清除点", () -> frame.canvas().clearPerspective()));
@@ -86,7 +86,7 @@ public class GeometryPanel extends JPanel {
         lensRow = new FlatWidgets.SliderRow("畸变", -100, 100, 0, 1);
         body.add(lensRow);
         body.add(leftRow(btn("应用畸变（正=桶形 负=枕形）", () -> {
-            if (lensRow.value() != 0) apply(Geometry.lensDistort(frame.baseImage(), lensRow.value() / 100.0), "畸变");
+            if (lensRow.value() != 0) apply(Geometry.lensDistort(frame.bakeCurrent(), lensRow.value() / 100.0), "畸变");
         })));
         waveRow = new FlatWidgets.SliderRow("波浪", 0, 40, 12, 1);
         body.add(waveRow);
@@ -95,13 +95,13 @@ public class GeometryPanel extends JPanel {
         waveVertical.setOpaque(false);
         waveOpt.add(waveVertical);
         waveOpt.add(btn("应用波浪", () -> {
-            if (waveRow.value() != 0) apply(Geometry.wave(frame.baseImage(), waveRow.value(), 130, waveVertical.isSelected()), "波浪");
+            if (waveRow.value() != 0) apply(Geometry.wave(frame.bakeCurrent(), waveRow.value(), 130, waveVertical.isSelected()), "波浪");
         }));
         body.add(waveOpt);
         swirlRow = new FlatWidgets.SliderRow("旋涡", -100, 100, 0, 1);
         body.add(swirlRow);
         body.add(leftRow(btn("应用旋涡", () -> {
-            if (swirlRow.value() != 0) apply(Geometry.swirl(frame.baseImage(), swirlRow.value() / 100.0 * 2.6), "旋涡");
+            if (swirlRow.value() != 0) apply(Geometry.swirl(frame.bakeCurrent(), swirlRow.value() / 100.0 * 2.6), "旋涡");
         })));
 
         JScrollPane sp = new JScrollPane(body);

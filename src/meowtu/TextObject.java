@@ -26,6 +26,18 @@ public class TextObject {
         this.x = x; this.y = y;
     }
 
+    /** 深拷贝（状态快照用）。 */
+    public TextObject copy() {
+        TextObject t = new TextObject(text, x, y);
+        t.fontName = fontName;
+        t.size = size;
+        t.bold = bold;
+        t.italic = italic;
+        t.color = color;
+        t.outline = outline;
+        return t;
+    }
+
     public Font font() {
         int style = (bold ? Font.BOLD : 0) | (italic ? Font.ITALIC : 0);
         return new Font(fontName, style, size);

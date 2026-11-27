@@ -6,7 +6,7 @@ import meowtu.flatui.FlatWidgets;
 import javax.swing.*;
 import java.awt.*;
 
-/** 调节面板：13 个参数滑杆，拖动实时预览，松手自动应用（并入撤销栈）。 */
+/** 调节面板：13 个参数滑杆。数值常驻即效果（引擎持有参数、实时合成），松手记一个撤销检查点。 */
 public class AdjustPanel extends JPanel {
     private static final long serialVersionUID = 1L;
     private final MainFrame frame;
@@ -42,13 +42,13 @@ public class AdjustPanel extends JPanel {
         sharpen = row(body, "锐化", 0, 100, 1);
 
         JButton reset = new JButton("重置全部");
-        reset.addActionListener(e -> { resetRows(); frame.clearPreview(); });
+        reset.addActionListener(e -> frame.resetAllAdjustments());
         JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
         btnRow.setOpaque(false);
         btnRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         btnRow.add(reset);
         body.add(btnRow);
-        JLabel hint = new JLabel("拖动预览 · 松手应用 · 双击名称重置单项");
+        JLabel hint = new JLabel("拖动即生效 · 数值常驻可调回 · 松手记一步可撤销 · 双击名称重置单项");
         hint.setAlignmentX(Component.LEFT_ALIGNMENT);
         hint.setForeground(meowtu.flatui.FlatTheme.TEXT_FAINT);
         hint.setFont(hint.getFont().deriveFont(11f));
@@ -82,17 +82,15 @@ public class AdjustPanel extends JPanel {
 
     private void onChange(FlatWidgets.SliderRow src) {
         if (syncing || !frame.hasImage()) return;
-        AdjustParams p = collect();
-        if (src.slider.getValueIsAdjusting()) {
-            frame.previewAdjust(p);
-        } else {
-            boolean committed = frame.commitAdjust(p);
-            if (committed) resetRows();
-        }
+        writeParams();
+        frame.refreshView();
+        // 松手（或数值框回车、双击重置）记一个检查点，Ctrl+Z 可逐步退回；数值本身不归零
+        if (!src.slider.getValueIsAdjusting()) frame.checkpoint();
     }
 
-    private AdjustParams collect() {
-        AdjustParams p = new AdjustParams();
+    /** 把 13 个滑杆的当前值写进引擎的常驻参数对象。 */
+    private void writeParams() {
+        AdjustParams p = frame.adjustParams();
         p.exposure = exposure.value();
         p.brightness = brightness.value();
         p.contrast = contrast.value();
@@ -106,15 +104,24 @@ public class AdjustPanel extends JPanel {
         p.blacks = blacks.value();
         p.clarity = clarity.value();
         p.sharpen = sharpen.value();
-        return p;
     }
 
-    public void resetRows() {
+    /** 把引擎参数回填到滑杆（撤销/重做/重置后调用；回填期间不触发写回）。 */
+    public void syncFromParams(AdjustParams p) {
         syncing = true;
-        for (FlatWidgets.SliderRow r : new FlatWidgets.SliderRow[]{exposure, brightness, contrast, temperature, tint,
-                saturation, vibrance, highlights, shadows, whites, blacks, clarity, sharpen}) {
-            r.setValueSilently(0);
-        }
+        exposure.setValueSilently(p.exposure);
+        brightness.setValueSilently(p.brightness);
+        contrast.setValueSilently(p.contrast);
+        temperature.setValueSilently(p.temperature);
+        tint.setValueSilently(p.tint);
+        saturation.setValueSilently(p.saturation);
+        vibrance.setValueSilently(p.vibrance);
+        highlights.setValueSilently(p.highlights);
+        shadows.setValueSilently(p.shadows);
+        whites.setValueSilently(p.whites);
+        blacks.setValueSilently(p.blacks);
+        clarity.setValueSilently(p.clarity);
+        sharpen.setValueSilently(p.sharpen);
         syncing = false;
     }
 }

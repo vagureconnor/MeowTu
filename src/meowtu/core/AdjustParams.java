@@ -28,6 +28,14 @@ public class AdjustParams {
                 && whites == 0 && blacks == 0 && clarity == 0 && sharpen == 0;
     }
 
+    /** 把另一个参数对象的全部字段拷入本对象（保持本对象引用不变，供状态恢复用）。 */
+    public void setFrom(AdjustParams o) {
+        exposure = o.exposure; brightness = o.brightness; contrast = o.contrast;
+        temperature = o.temperature; tint = o.tint; saturation = o.saturation;
+        vibrance = o.vibrance; highlights = o.highlights; shadows = o.shadows;
+        whites = o.whites; blacks = o.blacks; clarity = o.clarity; sharpen = o.sharpen;
+    }
+
     public AdjustParams copy() {
         AdjustParams p = new AdjustParams();
         p.exposure = exposure; p.brightness = brightness; p.contrast = contrast;

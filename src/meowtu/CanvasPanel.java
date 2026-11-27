@@ -28,6 +28,7 @@ public class CanvasPanel extends JPanel {
     private BufferedImage image;        // 当前显示图（可为预览图）
     private BufferedImage original;     // 对比用原图
     private BufferedImage overlayImage; // 抠图结果等覆盖显示（优先于 image）
+    private int coordW = -1, coordH = -1; // 交互坐标系尺寸（底图尺寸）；显示图可为降采样预览，选框/文字坐标始终以底图为准
     private Compare compare = Compare.OFF;
     private Tool tool = Tool.BROWSE;
     private double zoom = 1.0;          // 相对适配倍率
@@ -68,6 +69,10 @@ public class CanvasPanel extends JPanel {
 
     // ---------- 外部接口 ----------
     public void setListener(Listener l) { this.listener = l; }
+    /** 设置交互坐标系尺寸（底图宽高）。显示图被拉伸到该尺寸的画布框内绘制，坐标换算与之对齐。 */
+    public void setCoordSize(int w, int h) { this.coordW = w; this.coordH = h; repaint(); }
+    private int coordWidth() { BufferedImage img = shown(); return coordW > 0 ? coordW : (img == null ? 0 : img.getWidth()); }
+    private int coordHeight() { BufferedImage img = shown(); return coordH > 0 ? coordH : (img == null ? 0 : img.getHeight()); }
     public void setImage(BufferedImage img) { this.image = img; repaint(); }
     public BufferedImage getImage() { return image; }
     public void setOriginal(BufferedImage img) { this.original = img; repaint(); }
@@ -104,7 +109,7 @@ public class CanvasPanel extends JPanel {
     private double fitScale() {
         BufferedImage img = shown();
         if (img == null) return 1;
-        double s = Math.min((getWidth() - 48.0) / img.getWidth(), (getHeight() - 48.0) / img.getHeight());
+        double s = Math.min((getWidth() - 48.0) / coordWidth(), (getHeight() - 48.0) / coordHeight());
         return Math.min(s, 8);
     }
 
@@ -114,7 +119,7 @@ public class CanvasPanel extends JPanel {
         BufferedImage img = shown();
         if (img == null) return new Point2D.Double(0, 0);
         double s = scale();
-        double w = img.getWidth() * s, h = img.getHeight() * s;
+        double w = coordWidth() * s, h = coordHeight() * s;
         return new Point2D.Double((getWidth() - w) / 2 + panX, (getHeight() - h) / 2 + panY);
     }
 
@@ -152,15 +157,15 @@ public class CanvasPanel extends JPanel {
         if (compare == Compare.HOLD) { holdingOriginal = true; repaint(); return; }
         if (compare == Compare.SLIDE && Math.abs(slideScreenX() - e.getX()) < 10) { draggingSlide = true; return; }
         switch (tool) {
-            case CROP, CUTOUT_RECT -> dragRect = new Rectangle(clampi(ip.getX(), img), clampi(ip.getY(), img), 0, 0);
+            case CROP, CUTOUT_RECT -> dragRect = new Rectangle(clampi(ip.getX(), coordWidth()), clampi(ip.getY(), coordHeight()), 0, 0);
             case CUTOUT_FG, CUTOUT_BG -> {
                 currentStroke = new ArrayList<>();
-                currentStroke.add(new Point(clampi(ip.getX(), img), clampi(ip.getY(), img)));
+                currentStroke.add(new Point(clampi(ip.getX(), coordWidth()), clampi(ip.getY(), coordHeight())));
                 (tool == Tool.CUTOUT_FG ? fgStrokes : bgStrokes).add(currentStroke);
             }
             case PERSPECTIVE -> {
                 if (perspectivePoints.size() < 4) {
-                    perspectivePoints.add(new Point(clampi(ip.getX(), img), clampi(ip.getY(), img)));
+                    perspectivePoints.add(new Point(clampi(ip.getX(), coordWidth()), clampi(ip.getY(), coordHeight())));
                     if (listener != null) listener.onPerspectivePointsChanged();
                 }
             }
@@ -188,7 +193,7 @@ public class CanvasPanel extends JPanel {
         Point2D ip = toImage(e.getPoint());
         if (draggingSlide) {
             Point2D o = origin();
-            slidePos = clamp01((e.getX() - o.getX()) / (img.getWidth() * scale()));
+            slidePos = clamp01((e.getX() - o.getX()) / (coordWidth() * scale()));
             repaint(); return;
         }
         switch (tool) {
@@ -196,7 +201,7 @@ public class CanvasPanel extends JPanel {
             case CROP, CUTOUT_RECT -> {
                 if (dragRect != null) {
                     int x0 = dragRect.x, y0 = dragRect.y;
-                    int x1 = clampi(ip.getX(), img), y1 = clampi(ip.getY(), img);
+                    int x1 = clampi(ip.getX(), coordWidth()), y1 = clampi(ip.getY(), coordHeight());
                     if (tool == Tool.CROP && cropAspect > 0) {
                         int w = Math.abs(x1 - x0);
                         int hh = (int) Math.round(w / cropAspect);
@@ -206,7 +211,7 @@ public class CanvasPanel extends JPanel {
                 }
             }
             case CUTOUT_FG, CUTOUT_BG -> {
-                if (currentStroke != null) currentStroke.add(new Point(clampi(ip.getX(), img), clampi(ip.getY(), img)));
+                if (currentStroke != null) currentStroke.add(new Point(clampi(ip.getX(), coordWidth()), clampi(ip.getY(), coordHeight())));
             }
             case TEXT -> {
                 if (dragText != null) { dragText.x = ip.getX() - textOffX; dragText.y = ip.getY() - textOffY; }
@@ -233,8 +238,8 @@ public class CanvasPanel extends JPanel {
         if (listener != null) listener.onInteractionEnd();
     }
 
-    private int clampi(double v, BufferedImage img) {
-        return Math.max(0, Math.min(img.getWidth() - 1, (int) Math.round(v)));
+    private int clampi(double v, int max) {
+        return Math.max(0, Math.min(max - 1, (int) Math.round(v)));
     }
 
     private static Rectangle rectFrom(int x0, int y0, int x1, int y1) {
@@ -247,7 +252,7 @@ public class CanvasPanel extends JPanel {
         BufferedImage img = shown();
         if (img == null) return 0;
         Point2D o = origin();
-        return (int) (o.getX() + img.getWidth() * scale() * slidePos);
+        return (int) (o.getX() + coordWidth() * scale() * slidePos);
     }
 
     // ---------- 绘制 ----------
@@ -267,7 +272,7 @@ public class CanvasPanel extends JPanel {
         Point2D o = origin();
         double s = scale();
         int ix = (int) Math.round(o.getX()), iy = (int) Math.round(o.getY());
-        int iw = (int) Math.round(img.getWidth() * s), ih = (int) Math.round(img.getHeight() * s);
+        int iw = (int) Math.round(coordWidth() * s), ih = (int) Math.round(coordHeight() * s);
 
         // 棋盘格
         int cell = 10;
@@ -283,23 +288,27 @@ public class CanvasPanel extends JPanel {
 
         BufferedImage cur = img;
         BufferedImage orig = original;
-        boolean useOrig = holdingOriginal && compare == Compare.HOLD && orig != null
-                && orig.getWidth() == cur.getWidth() && orig.getHeight() == cur.getHeight();
+        int cw = coordWidth(), chh = coordHeight();
+        boolean origFits = orig != null && orig.getWidth() == cw && orig.getHeight() == chh;
+        boolean useOrig = holdingOriginal && compare == Compare.HOLD && origFits;
         if (useOrig) {
             g.drawImage(orig, ix, iy, iw, ih, null);
-        } else if (compare == Compare.SPLIT && orig != null && orig.getWidth() == cur.getWidth()) {
+        } else if (compare == Compare.SPLIT && origFits) {
             int half = iw / 2;
-            g.drawImage(orig, ix, iy, ix + half, iy + ih, 0, 0, cur.getWidth() / 2, cur.getHeight(), null);
+            g.drawImage(orig, ix, iy, ix + half, iy + ih, 0, 0, orig.getWidth() / 2, orig.getHeight(), null);
             g.drawImage(cur, ix + half, iy, ix + iw, iy + ih, cur.getWidth() / 2, 0, cur.getWidth(), cur.getHeight(), null);
             g.setColor(FlatTheme.ACCENT);
             g.fillRect(ix + half - 1, iy, 2, ih);
             tag(g, "原图", ix + 6, iy + 6);
             tag(g, "当前", ix + iw - 6 - 28, iy + 6);
-        } else if (compare == Compare.SLIDE && orig != null && orig.getWidth() == cur.getWidth()) {
+        } else if (compare == Compare.SLIDE && origFits) {
             g.drawImage(cur, ix, iy, iw, ih, null);
             int sx = slideScreenX();
             int ow = (int) ((sx - ix) / s);
-            if (ow > 0) g.drawImage(orig, ix, iy, sx, iy + ih, 0, 0, Math.min(ow, cur.getWidth()), cur.getHeight(), null);
+            if (ow > 0) {
+                int srcW = Math.min((int) Math.round(ow * (double) orig.getWidth() / cw), orig.getWidth());
+                g.drawImage(orig, ix, iy, sx, iy + ih, 0, 0, srcW, orig.getHeight(), null);
+            }
             g.setColor(FlatTheme.ACCENT);
             g.fillRect(sx - 1, iy, 2, ih);
             g.fillOval(sx - 9, iy + ih / 2 - 9, 18, 18);

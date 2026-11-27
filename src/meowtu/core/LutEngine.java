@@ -13,6 +13,19 @@ public final class LutEngine {
 
     public static BufferedImage apply(BufferedImage src, AdjustParams p) {
         if (p == null || p.isIdentity()) return Img.copy(src);
+        return applySpatial(applyPixelStages(src, p), p);
+    }
+
+    /** 是否含逐像素段参数（除清晰度/锐化外的全部参数）。 */
+    private static boolean hasPixelStages(AdjustParams p) {
+        return p.exposure != 0 || p.brightness != 0 || p.contrast != 0 || p.temperature != 0 || p.tint != 0
+                || p.saturation != 0 || p.vibrance != 0 || p.highlights != 0 || p.shadows != 0
+                || p.whites != 0 || p.blacks != 0;
+    }
+
+    /** 第一段：逐通道 LUT + 逐像素影调/色彩（不含清晰度/锐化）。无逐像素参数时返回拷贝。 */
+    public static BufferedImage applyPixelStages(BufferedImage src, AdjustParams p) {
+        if (p == null || !hasPixelStages(p)) return Img.copy(src);
         int w = src.getWidth(), h = src.getHeight();
         int[] px = Img.pixels(src);
 
@@ -58,8 +71,13 @@ public final class LutEngine {
             }
             px[i] = a | (r << 16) | (g << 8) | b;
         }
-        BufferedImage out = Img.fromPixels(w, h, px);
+        return Img.fromPixels(w, h, px);
+    }
 
+    /** 第二段：空间项（清晰度、锐化）。无空间项时原样返回入参（调用方保证入参为可独占的新图）。 */
+    public static BufferedImage applySpatial(BufferedImage src, AdjustParams p) {
+        if (p == null || (p.clarity == 0 && p.sharpen <= 0)) return src;
+        BufferedImage out = src;
         if (p.clarity != 0) out = applyClarity(out, p.clarity);
         if (p.sharpen > 0) out = applySharpen(out, p.sharpen);
         return out;

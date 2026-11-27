@@ -38,14 +38,15 @@ public class CurvesPanel extends JPanel {
 
         JPanel btns = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
         btns.setOpaque(false);
-        JButton apply = new JButton("应用曲线");
-        apply.putClientProperty("flat.primary", Boolean.TRUE);
-        apply.addActionListener(e -> frame.commitCurves());
         JButton reset = new JButton("重置");
-        reset.addActionListener(e -> { frame.curves().reset(); editor.repaint(); frame.clearPreview(); });
-        btns.add(apply);
+        reset.addActionListener(e -> {
+            frame.curves().reset();
+            editor.repaint();
+            frame.refreshView();
+            frame.checkpoint();
+        });
         btns.add(reset);
-        JLabel hint = new JLabel("拖动加点/移点，右键删点");
+        JLabel hint = new JLabel("拖动即生效 · 双击加点 · 右键删点 · 松手记一步可撤销");
         hint.setForeground(FlatTheme.TEXT_FAINT);
         hint.setFont(hint.getFont().deriveFont(11f));
         btns.add(hint);
@@ -56,9 +57,13 @@ public class CurvesPanel extends JPanel {
             Curves p = Curves.preset((String) presetBox.getSelectedItem());
             for (int ch = 0; ch < 4; ch++) frame.curves().setPoints(ch, p.points(ch));
             editor.repaint();
-            frame.previewCurves();
+            frame.refreshView();
+            frame.checkpoint();
         });
     }
+
+    /** 引擎状态变化（撤销/重做/重置）后重画曲线编辑器。 */
+    public void refreshFromEngine() { editor.repaint(); }
 
     /** 曲线编辑区：坐标 (0,0) 左下为输入/输出原点，内部翻转 Y。 */
     private class CurveEditor extends JComponent {
@@ -70,14 +75,18 @@ public class CurvesPanel extends JPanel {
             MouseAdapter ma = new MouseAdapter() {
                 @Override public void mousePressed(MouseEvent e) { onPress(e); }
                 @Override public void mouseDragged(MouseEvent e) { onDrag(e); }
-                @Override public void mouseReleased(MouseEvent e) { if (moved) frame.previewCurves(); moved = false; dragPoint = null; }
+                @Override public void mouseReleased(MouseEvent e) {
+                    if (moved) { frame.refreshView(); frame.checkpoint(); }
+                    moved = false; dragPoint = null;
+                }
                 @Override public void mouseClicked(MouseEvent e) {
                     if (e.getClickCount() == 2 && dragPoint == null) {
                         Point v = toValue(e.getPoint());
                         frame.curves().points(channel).add(v);
                         frame.curves().setPoints(channel, frame.curves().points(channel));
                         repaint();
-                        frame.previewCurves();
+                        frame.refreshView();
+                        frame.checkpoint();
                     }
                 }
             };
@@ -115,7 +124,8 @@ public class CurvesPanel extends JPanel {
                     pts.remove(dragPoint);
                     dragPoint = null;
                     repaint();
-                    frame.previewCurves();
+                    frame.refreshView();
+                    frame.checkpoint();
                 }
                 return;
             }
@@ -134,6 +144,7 @@ public class CurvesPanel extends JPanel {
             }
             moved = true;
             frame.curves().setPoints(channel, frame.curves().points(channel));
+            frame.refreshView();
             // setPoints 复制了点对象，重新定位拖动点
             for (Point p : frame.curves().points(channel)) {
                 if (Math.abs(p.x - dragPoint.x) <= 1 && Math.abs(p.y - dragPoint.y) <= 1) { dragPoint = p; break; }

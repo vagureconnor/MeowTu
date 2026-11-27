@@ -113,7 +113,7 @@ public class CutoutPanel extends JPanel {
         if (!frame.hasImage()) { frame.setStatus("先打开一张图片"); return; }
         Rectangle rect = frame.canvas().getCutoutRect();
         if (rect == null) { frame.setStatus("还没有框选：先在画布上拖出主体矩形"); return; }
-        BufferedImage base = frame.baseImage();
+        BufferedImage base = frame.bakeCurrent();
         status.setText("抠图计算中…（大图会先缩小计算）");
         frame.setStatus("抠图计算中…");
         new SwingWorker<BufferedImage, Void>() {
