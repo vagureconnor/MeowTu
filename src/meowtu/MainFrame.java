@@ -326,22 +326,43 @@ public class MainFrame extends JFrame {
         setStatus(label + " 已应用");
     }
 
-    /** 重新显示当前状态（标签页切换时调用：取消滤镜预览，回到常驻状态的合成显示）。 */
+    /** 重新显示当前状态（标签页切换时调用：回到常驻状态的合成显示，滤镜是状态不会被切页清掉）。 */
     public void clearPreview() {
         refreshView();
     }
 
-    /** 滤镜预览：把滤镜作用在当前效果（底图+调节+曲线）的预览图上，不改变任何状态。 */
-    public void previewFilter(String id, double strength) {
+    public String activeFilter() { return editor.activeFilter(); }
+    public double filterStrength() { return editor.filterStrength(); }
+
+    /**
+     * 设定当前滤镜（状态式，与网页版同语义）：点选即生效，管线合成时应用恰好一次；
+     * 重复点同一个不叠加、不重复入栈；点另一个直接替换。状态变化可撤销。
+     */
+    public void setFilter(String id, double strength) {
         if (!editor.hasImage()) return;
-        canvas.setImage(Filters.apply(id, editor.renderPreview(), strength));
+        if (!editor.setFilter(id, strength)) return;
+        syncUIFromEngine();
+        setStatus("滤镜：" + filterName(id) + "（再点不变，点其他滤镜替换）");
     }
 
-    public void commitFilter(String id, double strength) {
+    /** 取消滤镜，回到无滤镜状态（可撤销）。 */
+    public void clearFilter() {
         if (!editor.hasImage()) return;
-        editor.commitImage(Filters.apply(id, editor.bakeCurrent(), strength));
-        afterStateChange(false);
-        setStatus("滤镜已应用");
+        if (!editor.clearFilter()) return;
+        syncUIFromEngine();
+        setStatus("已取消滤镜");
+    }
+
+    /** 滤镜强度拖动中：只改数值实时预览，不动历史栈；松手由 checkpoint() 记检查点。 */
+    public void setFilterStrengthLive(double strength) {
+        if (!editor.hasImage() || editor.activeFilter() == null) return;
+        editor.setFilterStrengthLive(strength);
+        refreshView();
+    }
+
+    private static String filterName(String id) {
+        for (Filters.Def d : Filters.all()) if (d.id.equals(id)) return d.name;
+        return id;
     }
 
     /** 把文字对象连同当前调节/曲线一起烘焙进底图并提交（对象列表随之清空）。 */
@@ -400,11 +421,12 @@ public class MainFrame extends JFrame {
         if (fit) canvas.fitZoom();
     }
 
-    /** 把引擎里的参数/曲线/文字回填到各面板——撤销后滑杆数值、曲线点、文字能原样回来靠这里。 */
+    /** 把引擎里的参数/曲线/文字/滤镜回填到各面板——撤销后滑杆数值、曲线点、文字、当前滤镜能原样回来靠这里。 */
     private void syncUIFromEngine() {
         adjustPanel.syncFromParams(editor.params());
         curvesPanel.refreshFromEngine();
         textPanel.refreshList();
+        filtersPanel.syncFromEngine();
         refreshView();
     }
 

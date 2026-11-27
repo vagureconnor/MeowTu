@@ -33,6 +33,17 @@ public class SmokeTest {
         return img;
     }
 
+    /** 逐像素完全一致（尺寸 + 每个像素 ARGB 相同）。 */
+    static boolean samePixels(BufferedImage a, BufferedImage b) {
+        if (a == null || b == null) return a == b;
+        if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()) return false;
+        int w = a.getWidth(), h = a.getHeight();
+        int[] pa = a.getRGB(0, 0, w, h, null, 0, w);
+        int[] pb = b.getRGB(0, 0, w, h, null, 0, w);
+        for (int i = 0; i < pa.length; i++) if (pa[i] != pb[i]) return false;
+        return true;
+    }
+
     static boolean changed(BufferedImage a, BufferedImage b) {
         if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()) return true;
         int diff = 0;
@@ -141,6 +152,41 @@ public class SmokeTest {
         ed.texts().add(new meowtu.TextObject("喵", 5, 5));
         check(ed.commitTexts() && ed.texts().isEmpty(), "引擎：栅格化文字后列表清空");
         check(ed.undo() && ed.texts().size() == 1, "引擎：撤销后文字对象回来");
+
+        // ---- 滤镜状态式（与网页版同语义：不烘焙、不叠加、可替换、可取消、可撤销） ----
+        meowtu.Editor fe = new meowtu.Editor();
+        BufferedImage fimg = testImage(120, 90);
+        fe.setFreshImage(fimg);
+        check(fe.activeFilter() == null, "滤镜：载入新图时无滤镜");
+        check(fe.setFilter("bw", 1.0) && "bw".equals(fe.activeFilter()), "滤镜：设定当前滤镜");
+        check(samePixels(fe.bakeCurrent(), Filters.apply("bw", fimg, 1.0)), "滤镜：合成结果等于单次应用");
+        check(fe.setFilter("bw", 1.0), "滤镜：重复点同一滤镜被受理");
+        check(samePixels(fe.bakeCurrent(), Filters.apply("bw", fimg, 1.0)), "滤镜：连点两次与一次像素一致（不叠加）");
+        check(fe.undo() && fe.activeFilter() == null && !fe.canUndo(), "滤镜：连点不重复入栈（一次撤销即回到无滤镜）");
+        check(fe.redo() && "bw".equals(fe.activeFilter()), "滤镜：重做恢复滤镜状态");
+        check(fe.setFilter("xray", 1.0), "滤镜：点另一个滤镜直接替换");
+        check(samePixels(fe.bakeCurrent(), Filters.apply("xray", fimg, 1.0)), "滤镜：切换后等于只应用后者");
+        check(fe.undo() && "bw".equals(fe.activeFilter()), "滤镜：撤销退回上一个滤镜状态");
+        check(samePixels(fe.bakeCurrent(), Filters.apply("bw", fimg, 1.0)), "滤镜：撤销后像素回到上一个滤镜");
+        check(fe.redo() && "xray".equals(fe.activeFilter()), "滤镜：重做回到后一个滤镜");
+        check(fe.clearFilter() && fe.activeFilter() == null, "滤镜：取消滤镜回到无滤镜");
+        check(samePixels(fe.bakeCurrent(), fimg), "滤镜：取消后与原图逐像素一致");
+        check(!fe.clearFilter(), "滤镜：无滤镜时取消无变化");
+        check(fe.undo() && "xray".equals(fe.activeFilter()), "滤镜：取消也可撤销");
+        // 强度是状态的一部分：半强度合成等于单次半强度应用，且进快照可撤销
+        check(fe.setFilter("vintage", 0.5), "滤镜：带强度设定滤镜");
+        check(samePixels(fe.bakeCurrent(), Filters.apply("vintage", fimg, 0.5)), "滤镜：半强度等于单次半强度应用");
+        fe.setFilterStrengthLive(0.8);
+        check(samePixels(fe.bakeCurrent(), Filters.apply("vintage", fimg, 0.8)), "滤镜：强度实时调整只改数值");
+        check(fe.checkpointAdjust() && fe.undo() && fe.filterStrength() == 0.5, "滤镜：强度调整记检查点且可撤销");
+        // 离散操作的全合成含滤镜恰好一次，提交后滤镜状态归零（已烘焙进新底图）
+        BufferedImage flippedFiltered = Geometry.flipH(Filters.apply("vintage", fimg, 0.5));
+        fe.commitImage(Geometry.flipH(fe.bakeCurrent()));
+        check(fe.activeFilter() == null, "滤镜：离散操作提交后滤镜归零");
+        check(samePixels(fe.base(), flippedFiltered), "滤镜：烘焙进新底图的滤镜恰好一次");
+        check(fe.undo() && "vintage".equals(fe.activeFilter()) && fe.base() == fimg, "滤镜：撤销离散操作连滤镜状态一起恢复");
+        fe.setFreshImage(testImage(60, 40));
+        check(fe.activeFilter() == null && !fe.canUndo(), "滤镜：打开新图滤镜归零且清历史");
 
         System.out.println("SMOKE_ALL_PASS 共 " + passed + " 项");
     }
