@@ -5,11 +5,20 @@
   --bg-stage:#1c1c1c;
   --panel:#2e2e2e;
   --panel-2:#383838;
+  --panel-3:#464646;
+  --field:#242424;
+  --inset:#222222;
   --line:#454545;
   --text:#f0f0f0;
+  --text-soft:#d8d8d8;
   --muted:#a8a8a8;
   --accent:#4da3ff;
   --accent-dim:rgba(77,163,255,.16);
+  --on-accent:#ffffff;
+  --danger:#ff7b72;
+  --warn:#e8c268;
+  --scrim:rgba(12,12,12,.6);
+  --float:rgba(30,30,30,.94);
   --radius:10px;
   --topbar-h:56px;
   --statusbar-h:30px;
@@ -51,8 +60,8 @@ svg{display:block}
   font-size:14px;white-space:nowrap;
 }
 .tbtn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
-.tbtn:active{background:#464646}
-.tbtn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.tbtn:active{background:var(--panel-3)}
+.tbtn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .tbtn.primary:active{background:#3b8ef0}
 .tbtn.icon-only{padding:0;width:42px}
 
@@ -116,7 +125,7 @@ svg{display:block}
 #selBar{
   position:absolute;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:5;
   display:flex;align-items:center;gap:10px;
-  background:rgba(30,30,30,.94);border:1px solid var(--line);border-radius:999px;
+  background:var(--float);border:1px solid var(--line);border-radius:999px;
   padding:7px 8px 7px 16px;box-shadow:0 8px 28px rgba(0,0,0,.5);
   white-space:nowrap;
 }
@@ -128,19 +137,19 @@ svg{display:block}
 #confirmDlg{
   position:fixed;inset:0;z-index:50;
   display:flex;align-items:center;justify-content:center;
-  background:rgba(12,12,12,.6);padding:20px;
+  background:var(--scrim);padding:20px;
 }
 #confirmDlg[hidden]{display:none}
 #filterDlg{
   position:fixed;inset:0;z-index:50;
   display:flex;align-items:center;justify-content:center;
-  background:rgba(12,12,12,.6);padding:20px;
+  background:var(--scrim);padding:20px;
 }
 #filterDlg[hidden]{display:none}
 #styleDlg{
   position:fixed;inset:0;z-index:50;
   display:flex;align-items:center;justify-content:center;
-  background:rgba(12,12,12,.6);padding:20px;
+  background:var(--scrim);padding:20px;
 }
 #styleDlg[hidden]{display:none}
 .sd-card{max-width:430px;max-height:86vh;overflow-y:auto}
@@ -173,7 +182,7 @@ svg{display:block}
   background:var(--panel-2);border:1px solid var(--line);font-size:13.5px;
 }
 .mini-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.mini-btn.ok{background:var(--accent);border-color:var(--accent);color:#fff}
+.mini-btn.ok{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 
 /* 忙碌 */
 #busy{
@@ -211,23 +220,23 @@ svg{display:block}
 }
 .page > .group-title:first-child{margin-top:0;padding-top:0;border-top:none}
 .hint{font-size:12.5px;color:var(--muted);line-height:1.55;margin-top:9px}
-.desc{font-size:13.5px;line-height:1.65;color:#d8d8d8}
+.desc{font-size:13.5px;line-height:1.65;color:var(--text-soft)}
 .block-btn{
   display:block;width:100%;min-height:42px;margin-top:12px;
   background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);font-size:14.5px;
 }
-.block-btn:active{background:#464646}
-.block-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.block-btn:active{background:var(--panel-3)}
+.block-btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .check-row{display:flex;align-items:center;gap:8px;font-size:14px;margin-top:11px;cursor:pointer}
 .check-row input{width:18px;height:18px;accent-color:var(--accent)}
 .field{display:block;font-size:13.5px;color:var(--muted);margin-top:12px}
 .field input{
   display:block;width:100%;margin-top:6px;min-height:42px;padding:0 11px;
-  background:#242424;border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:15px;
+  background:var(--field);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:15px;
 }
 .field input[type="color"]{padding:4px;height:44px}
 select{
-  background:#242424;border:1px solid var(--line);border-radius:8px;color:var(--text);
+  background:var(--field);border:1px solid var(--line);border-radius:8px;color:var(--text);
   min-height:38px;padding:0 8px;font-size:14px;
 }
 
@@ -254,13 +263,13 @@ select{
 .curve-head label{font-size:13.5px;color:var(--muted);display:flex;align-items:center;gap:7px}
 #curveCanvas,#histCanvas{
   width:100%;height:auto;display:block;
-  background:#222;border:1px solid var(--line);border-radius:8px;touch-action:none;
+  background:var(--inset);border:1px solid var(--line);border-radius:8px;touch-action:none;
 }
 
 /* 滤镜网格 */
 .filter-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
 .lut-cell{display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:5px}
-.lut-cell canvas{width:100%;height:auto;display:block;border-radius:4px;background:#222}
+.lut-cell canvas{width:100%;height:auto;display:block;border-radius:4px;background:var(--inset)}
 .lut-cell span{text-align:center}
 .filter-btn{
   min-height:46px;padding:8px 4px;border-radius:var(--radius);
@@ -272,11 +281,11 @@ select{
 /* 几何 */
 .btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 /* 一句话修图 + 一键换背景 */
-#nlInput{width:100%;box-sizing:border-box;resize:vertical;border:1px solid var(--line,#d8dce2);border-radius:10px;padding:9px 10px;font:inherit;background:var(--field,#fff);color:inherit}
+#nlInput{width:100%;box-sizing:border-box;resize:vertical;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font:inherit;background:var(--field);color:var(--text)}
 .nl-read{font-size:13px;line-height:1.65}
 .nl-read ul{margin:4px 0;padding-left:18px}
-.nl-read .nl-bad{color:#c0392b}
-.nl-read .nl-ex{color:#8a6d1a}
+.nl-read .nl-bad{color:var(--danger)}
+.nl-read .nl-ex{color:var(--warn)}
 .bg-btn{display:flex;align-items:center;gap:7px}
 .bg-swatch{width:20px;height:20px;border-radius:6px;border:1px solid rgba(0,0,0,.18);flex:none}
 .cell-btn{
@@ -291,7 +300,7 @@ select{
 .size-row label{flex:1;font-size:13.5px;color:var(--muted)}
 .size-row input{
   display:block;width:100%;margin-top:6px;min-height:42px;padding:0 11px;
-  background:#242424;border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:15px;
+  background:var(--field);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:15px;
 }
 
 /* 文字列表 */
@@ -300,7 +309,7 @@ select{
   background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;
 }
 .text-item span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.text-item button{color:#ff7b72;font-size:13px;padding:5px 7px}
+.text-item button{color:var(--danger);font-size:13px;padding:5px 7px}
 
 /* 图层面板 */
 .layer-field{margin-top:0}
@@ -329,7 +338,7 @@ select{
 }
 .layer-name-input{
   flex:1;min-width:0;min-height:38px;padding:0 8px;
-  background:#242424;border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:14px;
+  background:var(--field);border:1px solid var(--accent);border-radius:6px;color:var(--text);font-size:14px;
 }
 .layer-btns{margin-top:12px}
 .layer-mask-thumb{
@@ -360,12 +369,12 @@ select{
   text-align:left;min-height:36px;padding:6px 11px;border-radius:8px;
   background:var(--panel-2);border:1px solid var(--line);font-size:13.5px;color:var(--text);
 }
-.history-row.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.history-row.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .history-row.future{opacity:.45}
 
 /* 导出对话框 */
 #exportDlg{
-  position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:60;
+  position:fixed;inset:0;background:var(--scrim);z-index:60;
   display:flex;align-items:center;justify-content:center;padding:18px;
 }
 #exportDlg[hidden]{display:none}
@@ -437,3 +446,50 @@ select{
   .slider-row input[type="range"]::-webkit-slider-thumb{width:28px;height:28px;margin-top:-11.5px}
   .slider-row input[type="range"]::-moz-range-thumb{width:28px;height:28px}
 }
+
+/* ===== 展示打磨新增：样片菜单 / 对比滑杆 / 演示字幕条 ===== */
+#sampleMenu{
+  position:fixed;z-index:70;min-width:196px;
+  display:flex;flex-direction:column;gap:4px;padding:7px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  box-shadow:0 14px 40px rgba(0,0,0,.55);
+}
+#sampleMenu[hidden]{display:none}
+.sample-item{
+  display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px;
+  text-align:left;font-size:14px;color:var(--text);min-height:44px;
+}
+.sample-item:hover,.sample-item:active{background:var(--panel-2)}
+.sample-item canvas{width:84px;height:56px;flex:0 0 auto;border-radius:5px;background:var(--inset)}
+.sample-item .si-name{white-space:nowrap}
+#compareCanvas{
+  position:absolute;inset:0;width:100%;height:100%;
+  display:none;border-radius:4px;pointer-events:none;
+}
+#compareCanvas.on{display:block}
+#compareBar{
+  position:absolute;top:0;bottom:0;width:34px;margin-left:-17px;z-index:4;
+  cursor:ew-resize;touch-action:none;
+}
+#compareBar[hidden]{display:none}
+#compareBar .cb-line{
+  position:absolute;left:50%;top:0;bottom:0;width:2px;margin-left:-1px;
+  background:#fff;box-shadow:0 0 7px rgba(0,0,0,.65);
+}
+#compareBar .cb-handle{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:30px;height:30px;border-radius:50%;
+  background:var(--accent);color:var(--on-accent);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 9px rgba(0,0,0,.55);
+}
+#compareBar .cb-handle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.tbtn.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+#demoBar{
+  position:absolute;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:8;
+  display:flex;align-items:center;gap:12px;max-width:94%;
+  background:var(--float);border:1px solid var(--line);border-radius:999px;
+  padding:7px 8px 7px 18px;box-shadow:0 10px 30px rgba(0,0,0,.5);
+}
+#demoBar[hidden]{display:none}
+#demoCaption{font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

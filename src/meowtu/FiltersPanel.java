@@ -57,6 +57,9 @@ public class FiltersPanel extends JPanel {
         });
         bottom.add(strength, BorderLayout.NORTH);
         noneBtn.addActionListener(e -> frame.clearFilter());
+        JButton paramBtn = new JButton("参数滤镜…（19 个带参数）");
+        paramBtn.addActionListener(e -> openParamDialog());
+        bottom.add(paramBtn, BorderLayout.CENTER);
         JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         row.setOpaque(false);
         row.add(noneBtn);
@@ -66,6 +69,50 @@ public class FiltersPanel extends JPanel {
         row.add(hint);
         bottom.add(row, BorderLayout.SOUTH);
         add(bottom, BorderLayout.SOUTH);
+    }
+
+    /** 带参数滤镜对话框：滤镜下拉 + 按 Def 定义表生成滑杆，应用 = 一步可撤销（Editor.setFilterParams）。 */
+    private void openParamDialog() {
+        if (!frame.hasImage()) { frame.setStatus("先打开一张图片"); return; }
+        java.util.List<meowtu.filters.FiltersX.Def> defs = meowtu.filters.FiltersX.all();
+        JComboBox<meowtu.filters.FiltersX.Def> box = new JComboBox<>(defs.toArray(new meowtu.filters.FiltersX.Def[0]));
+        box.setRenderer(new DefaultListCellRenderer() {
+            @Override public Component getListCellRendererComponent(JList<?> l, Object v, int i, boolean sel, boolean f) {
+                return super.getListCellRendererComponent(l, v == null ? "" : ((meowtu.filters.FiltersX.Def) v).name, i, sel, f);
+            }
+        });
+        JPanel sliders = new JPanel();
+        sliders.setLayout(new BoxLayout(sliders, BoxLayout.Y_AXIS));
+        java.util.Map<String, FlatWidgets.SliderRow> rows = new HashMap<>();
+        Runnable rebuild = () -> {
+            sliders.removeAll();
+            rows.clear();
+            meowtu.filters.FiltersX.Def d = (meowtu.filters.FiltersX.Def) box.getSelectedItem();
+            if (d != null) {
+                for (int i = 0; i < d.pKeys.length; i++) {
+                    double span = d.pMax[i] - d.pMin[i];
+                    double scale = span <= 2 ? 0.01 : (span <= 20 ? 0.1 : 1.0);
+                    FlatWidgets.SliderRow row = new FlatWidgets.SliderRow(d.pKeys[i],
+                            (int) Math.round(d.pMin[i] / scale), (int) Math.round(d.pMax[i] / scale),
+                            (int) Math.round(d.pDef[i] / scale), scale);
+                    rows.put(d.pKeys[i], row);
+                    sliders.add(row);
+                }
+            }
+            sliders.revalidate();
+            sliders.repaint();
+        };
+        box.addActionListener(e -> rebuild.run());
+        rebuild.run();
+        JPanel dlg = new JPanel(new BorderLayout(0, 8));
+        dlg.add(box, BorderLayout.NORTH);
+        dlg.add(sliders, BorderLayout.CENTER);
+        if (JOptionPane.showConfirmDialog(this, dlg, "参数滤镜", JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) return;
+        meowtu.filters.FiltersX.Def d = (meowtu.filters.FiltersX.Def) box.getSelectedItem();
+        if (d == null) return;
+        java.util.Map<String, Double> params = new HashMap<>();
+        for (Map.Entry<String, FlatWidgets.SliderRow> e : rows.entrySet()) params.put(e.getKey(), e.getValue().value());
+        frame.setFilterParams(d.id, params);
     }
 
     /** 把引擎的当前滤镜状态回填到面板：列表选中态（高亮）+ 强度滑杆 + 「无滤镜」按钮态。撤销/重做/切换滤镜后调用。 */

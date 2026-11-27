@@ -21,6 +21,9 @@ rm -f sources.txt
 
 # LOGO 作为资源打进 JAR（窗口图标/顶栏用小图版，控制 JAR 体积；原图留在 assets/）
 cp assets/meowtu-logo-embed.png out/meowtu-logo-final.png
+# 一句话修图词库作为资源打进 JAR（同包路径 /meowtu/nl/lexicon.json）
+mkdir -p out/meowtu/nl
+cp src/meowtu/nl/lexicon.json out/meowtu/nl/lexicon.json
 
 printf 'Main-Class: meowtu.Main\n' > MANIFEST.tmp
 "$JAR" cfm meowtu.jar MANIFEST.tmp -C out .

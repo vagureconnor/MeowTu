@@ -22,7 +22,7 @@ import java.util.List;
 public class MainFrame extends JFrame {
     private static final long serialVersionUID = 1L;
     public static final int TAB_ADJUST = 0, TAB_FILTERS = 1, TAB_GEOMETRY = 2,
-            TAB_TEXT = 3, TAB_CUTOUT = 4;
+            TAB_TEXT = 3, TAB_CUTOUT = 4, TAB_LAYERS = 5, TAB_ADV = 6, TAB_SMART = 7;
     private static final String[] COMPARE_NAMES = {"不对比", "左右分屏", "滑块擦除", "长按原图"};
     private int compareIndex = 0;
     private JButton compareBtn;
@@ -43,6 +43,10 @@ public class MainFrame extends JFrame {
     private FiltersPanel filtersPanel;
     private HistogramPanel histogramPanel;
     private TextPanel textPanel;
+    private LayersPanel layersPanel;
+    private HistoryPanel historyPanel;
+    private SmartPanel smartPanel;
+    private AdvPanel advPanel;
     private final JToggleButton[] toolButtons = new JToggleButton[5];
 
     // 响应式布局：窄/竖窗口（手机竖屏）时左栏变顶部横条、右面板移到底部
@@ -102,6 +106,11 @@ public class MainFrame extends JFrame {
         file.add(item("打开…", "ctrl O", e -> openFile()));
         file.add(item("保存", "ctrl S", e -> saveFile()));
         file.add(item("导出…", null, e -> exportFile()));
+        file.addSeparator();
+        file.add(item("打开工程…（.meowtu）", null, e -> openProject()));
+        file.add(item("保存工程…（.meowtu）", null, e -> saveProject()));
+        file.add(item("导出配方…", null, e -> saveRecipe()));
+        file.add(item("套用配方…", null, e -> applyRecipeFile()));
         file.addSeparator();
         file.add(item("退出", null, e -> dispose()));
         JMenu edit = new JMenu("编辑");
@@ -276,6 +285,22 @@ public class MainFrame extends JFrame {
         tabs.addTab("几何", new GeometryPanel(this));
         tabs.addTab("文字", textPanel);
         tabs.addTab("抠图", new CutoutPanel(this));
+        layersPanel = new LayersPanel(this, editor);
+        historyPanel = new HistoryPanel(this, editor);
+        JPanel layerTab = new JPanel(new BorderLayout());
+        layerTab.setOpaque(false);
+        layerTab.add(layersPanel, BorderLayout.CENTER);
+        JPanel histWrap = new JPanel(new BorderLayout());
+        histWrap.setOpaque(false);
+        histWrap.setBorder(BorderFactory.createTitledBorder("历史记录"));
+        histWrap.add(historyPanel, BorderLayout.CENTER);
+        histWrap.setPreferredSize(new Dimension(0, 220));
+        layerTab.add(histWrap, BorderLayout.SOUTH);
+        tabs.addTab("图层", layerTab);
+        advPanel = new AdvPanel(this, editor);
+        tabs.addTab("高级", advPanel);
+        smartPanel = new SmartPanel(this, editor);
+        tabs.addTab("智能", smartPanel);
         tabs.setPreferredSize(new Dimension(304, 0));
         tabs.addChangeListener(e -> clearPreview());
         JPanel wrap = new JPanel(new BorderLayout());
@@ -334,7 +359,7 @@ public class MainFrame extends JFrame {
     /** 通用提交：把结果图设为当前图并入撤销栈（待生效的调节/曲线/文字已包含在结果里，随之归零）。 */
     public void applyCommitted(BufferedImage img, String label) {
         editor.commitImage(img);
-        afterStateChange(false);
+        afterStateChange(true);
         setStatus(label + " 已应用");
     }
 
@@ -357,6 +382,14 @@ public class MainFrame extends JFrame {
         setStatus("滤镜：" + filterName(id) + "（再点不变，点其他滤镜替换）");
     }
 
+    /** 设定带参数滤镜（FiltersX）：参数对话框确认后调用，一步可撤销。 */
+    public void setFilterParams(String id, java.util.Map<String, Double> params) {
+        if (!editor.hasImage()) return;
+        if (!editor.setFilterParams(id, params)) return;
+        syncUIFromEngine();
+        setStatus("滤镜：" + filterName(id));
+    }
+
     /** 取消滤镜，回到无滤镜状态（可撤销）。 */
     public void clearFilter() {
         if (!editor.hasImage()) return;
@@ -374,6 +407,7 @@ public class MainFrame extends JFrame {
 
     private static String filterName(String id) {
         for (Filters.Def d : Filters.all()) if (d.id.equals(id)) return d.name;
+        for (meowtu.filters.FiltersX.Def d : meowtu.filters.FiltersX.all()) if (d.id.equals(id)) return d.name;
         return id;
     }
 
@@ -418,7 +452,8 @@ public class MainFrame extends JFrame {
         }
         BufferedImage view = editor.renderView();
         canvas.setImage(view);
-        canvas.setCoordSize(editor.base().getWidth(), editor.base().getHeight());
+        java.awt.Dimension doc = editor.getSize();
+        canvas.setCoordSize(doc.width, doc.height);
         canvas.setOriginal(originalImage);
         histogramPanel.refresh(view);
         updateHistoryButtons();
@@ -429,6 +464,7 @@ public class MainFrame extends JFrame {
     private void afterStateChange(boolean fit) {
         canvas.setOverlayImage(null);
         syncUIFromEngine();
+        if (smartPanel != null) smartPanel.refreshWall();
         filtersPanel.refreshThumbs(false);
         if (fit) canvas.fitZoom();
     }
@@ -439,8 +475,28 @@ public class MainFrame extends JFrame {
         curvesPanel.refreshFromEngine();
         textPanel.refreshList();
         filtersPanel.syncFromEngine();
+        if (layersPanel != null) layersPanel.syncFromEngine();
+        if (historyPanel != null) historyPanel.syncFromEngine();
+        if (advPanel != null) advPanel.syncFromEngine();
         refreshView();
     }
+
+    /** 活动层切换后：把新活动层的参数/曲线/滤镜等回填全部面板。 */
+    public void onActiveLayerChanged() { syncUIFromEngine(); }
+
+    /** 图层结构/属性离散变化后：全量同步（与 afterStateChange 同路，另刷图层面板）。 */
+    public void afterLayerChange() { afterStateChange(false); }
+
+    /** 历史面板点击跳转后同步。 */
+    public void afterHistoryJump() { afterStateChange(false); }
+
+    /** 几何变换（尺寸可能变化）后：全量同步 + 重新适配画布显示。 */
+    public void afterTransform() { afterStateChange(true); }
+
+    /** 图层属性（不透明度等）拖动松手记检查点。 */
+    public void checkpointLayerProps() { checkpoint(); }
+
+    public Editor editor() { return editor; }
 
     /** 调节检查点（滑杆松手/曲线拖完/重置时调用）：把上个安定状态记入撤销栈。 */
     public void checkpoint() {
@@ -458,8 +514,9 @@ public class MainFrame extends JFrame {
 
     private void updateInfo() {
         if (!editor.hasImage()) { infoLabel.setText(""); return; }
+        java.awt.Dimension doc = editor.getSize();
         infoLabel.setText(String.format("%s · %d×%d · 缩放 %.0f%%",
-                fileName, editor.base().getWidth(), editor.base().getHeight(), canvas.getZoom() * 100));
+                fileName, doc.width, doc.height, canvas.getZoom() * 100));
     }
 
     // ---------- 文件操作 ----------
@@ -506,13 +563,49 @@ public class MainFrame extends JFrame {
 
     private void exportFile() {
         if (!editor.hasImage()) { setStatus("先打开一张图片"); return; }
-        JPanel p = new JPanel(new GridLayout(3, 2, 6, 6));
+        JPanel p = new JPanel(new GridLayout(4, 2, 6, 6));
         JComboBox<String> fmtBox = new JComboBox<>(Formats.SAVE_FORMATS);
         JSlider q = new JSlider(10, 100, 92);
         JSpinner scale = new JSpinner(new SpinnerNumberModel(100, 5, 400, 5));
+        JLabel estLabel = new JLabel("预估体积：—");
+        Runnable updateEst = () -> {
+            try {
+                BufferedImage img = composite();
+                int sc = (Integer) scale.getValue();
+                if (sc != 100) img = Img.resize(img, Math.max(1, img.getWidth() * sc / 100), Math.max(1, img.getHeight() * sc / 100));
+                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                String fmt = (String) fmtBox.getSelectedItem();
+                boolean ok;
+                if ("jpg".equals(fmt)) {
+                    javax.imageio.ImageWriter w = ImageIO.getImageWritersByFormatName("jpeg").next();
+                    javax.imageio.ImageWriteParam wp = w.getDefaultWriteParam();
+                    wp.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+                    wp.setCompressionQuality(q.getValue() / 100f);
+                    BufferedImage rgb = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+                    Graphics2D gg = rgb.createGraphics(); gg.drawImage(img, 0, 0, null); gg.dispose();
+                    w.setOutput(ImageIO.createImageOutputStream(bos));
+                    w.write(null, new javax.imageio.IIOImage(rgb, null, null), wp);
+                    w.dispose();
+                    ok = true;
+                } else if ("png".equals(fmt) || "bmp".equals(fmt)) {
+                    ok = ImageIO.write(img, fmt, bos);
+                } else {
+                    estLabel.setText("预估体积：该格式导出后可见");
+                    return;
+                }
+                if (ok) estLabel.setText(String.format("预估体积：约 %.1f KB（%d×%d）", bos.size() / 1024.0, img.getWidth(), img.getHeight()));
+            } catch (Exception ex) {
+                estLabel.setText("预估体积：—");
+            }
+        };
+        fmtBox.addActionListener(e -> updateEst.run());
+        q.addChangeListener(e -> { if (!q.getValueIsAdjusting()) updateEst.run(); });
+        scale.addChangeListener(e -> updateEst.run());
+        updateEst.run();
         p.add(new JLabel("格式")); p.add(fmtBox);
         p.add(new JLabel("JPEG 质量")); p.add(q);
         p.add(new JLabel("缩放 %")); p.add(scale);
+        p.add(new JLabel("")); p.add(estLabel);
         if (JOptionPane.showConfirmDialog(this, p, "导出选项", JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) return;
         JFileChooser fc = new JFileChooser();
         String fmt = (String) fmtBox.getSelectedItem();
@@ -523,6 +616,68 @@ public class MainFrame extends JFrame {
             setStatus("已导出 " + fc.getSelectedFile().getName());
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "导出失败：" + ex.getMessage(), "喵图", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+
+    // ---------- 工程文件 / 配方（与网页版同一 JSON 格式互通） ----------
+    private void openProject() {
+        JFileChooser fc = new JFileChooser();
+        fc.setFileFilter(new FileNameExtensionFilter("喵图工程文件", "meowtu"));
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        try {
+            String json = java.nio.file.Files.readString(fc.getSelectedFile().toPath(), java.nio.charset.StandardCharsets.UTF_8);
+            ProjectIO.importProject(editor, json);
+            BufferedImage flat = editor.bakeComposite();
+            originalImage = flat;
+            fileName = fc.getSelectedFile().getName();
+            afterStateChange(true);
+            setStatus("已打开工程 " + fc.getSelectedFile().getName() + "（" + editor.layerCount() + " 个图层）");
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "打开工程失败：" + ex.getMessage(), "喵图", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void saveProject() {
+        if (!editor.hasImage()) { setStatus("先打开一张图片"); return; }
+        JFileChooser fc = new JFileChooser();
+        fc.setSelectedFile(new File("未命名.meowtu"));
+        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        try {
+            java.nio.file.Files.writeString(fc.getSelectedFile().toPath(), ProjectIO.exportProject(editor), java.nio.charset.StandardCharsets.UTF_8);
+            setStatus("工程已保存 " + fc.getSelectedFile().getName());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "保存工程失败：" + ex.getMessage(), "喵图", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void saveRecipe() {
+        if (!editor.hasImage()) { setStatus("先打开一张图片"); return; }
+        JFileChooser fc = new JFileChooser();
+        fc.setSelectedFile(new File("配方.meowtu-recipe"));
+        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        try {
+            java.nio.file.Files.writeString(fc.getSelectedFile().toPath(), ProjectIO.exportRecipe(editor), java.nio.charset.StandardCharsets.UTF_8);
+            setStatus("配方已导出 " + fc.getSelectedFile().getName());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "导出配方失败：" + ex.getMessage(), "喵图", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void applyRecipeFile() {
+        if (!editor.hasImage()) { setStatus("先打开一张图片"); return; }
+        JFileChooser fc = new JFileChooser();
+        fc.setFileFilter(new FileNameExtensionFilter("喵图配方文件", "meowtu-recipe"));
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        try {
+            String json = java.nio.file.Files.readString(fc.getSelectedFile().toPath(), java.nio.charset.StandardCharsets.UTF_8);
+            editor.pushHistorySnapshot();
+            int n = ProjectIO.applyRecipe(editor, json);
+            editor.settleAfterExternalChange();
+            afterStateChange(false);
+            setStatus("配方已套用 " + n + " 个图层");
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "套用配方失败：" + ex.getMessage(), "喵图", JOptionPane.ERROR_MESSAGE);
         }
     }
 

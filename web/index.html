@@ -26,6 +26,9 @@
         <svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 18.5 10 13l3.5 3.5L17 13l3.5 4"/></svg>
         <span>示例图</span>
       </button>
+      <button id="btnSampleMenu" class="tbtn icon-only" title="展示样片：风景 / 人像 / 静物">
+        <svg viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></svg>
+      </button>
       <button id="btnUndo" class="tbtn icon-only" title="撤销 (Ctrl+Z)" disabled>
         <svg viewBox="0 0 24 24"><path d="M8.5 6.5 5 10l3.5 3.5"/><path d="M5 10h9a5 5 0 0 1 0 10h-3.5"/></svg>
       </button>
@@ -35,6 +38,10 @@
       <button id="btnCompare" class="tbtn" title="按住查看原图，松开恢复">
         <svg viewBox="0 0 24 24"><path d="M12 3.5v17"/><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 15.5 10 12l2 2v-8.5"/></svg>
         <span>对比</span>
+      </button>
+      <button id="btnCompareSlider" class="tbtn" title="对比滑杆：拖动分界线，左看原图、右看效果">
+        <svg viewBox="0 0 24 24"><path d="M12 3.5v17"/><path d="m8.5 9.5-3 2.5 3 2.5M15.5 9.5l3 2.5-3 2.5"/></svg>
+        <span>滑杆</span>
       </button>
       <button id="btnSave" class="tbtn" title="按上次格式快速导出 (Ctrl+S)">
         <svg viewBox="0 0 24 24"><path d="M5 3.5h11.5L20.5 7.5v12a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19.5v-15A1.5 1.5 0 0 1 5 3.5z"/><path d="M8 3.5V9h8V3.5"/><rect x="7.5" y="13.5" width="9" height="7"/></svg>
@@ -80,6 +87,11 @@
         <canvas id="editorCanvas"></canvas>
         <canvas id="overlay"></canvas>
         <img id="compareView" alt="原图对比">
+        <canvas id="compareCanvas"></canvas>
+        <div id="compareBar" hidden>
+          <div class="cb-line"></div>
+          <div class="cb-handle"><svg viewBox="0 0 24 24"><path d="m8.5 7-4 5 4 5M15.5 7l4 5-4 5"/></svg></div>
+        </div>
       </div>
 
       <!-- 无图时的投放区 -->
@@ -105,6 +117,12 @@
       <div id="busy" hidden>
         <div class="spinner"></div>
         <p id="busyText">处理中…</p>
+      </div>
+
+      <!-- 一键演示字幕条 -->
+      <div id="demoBar" hidden>
+        <span id="demoCaption"></span>
+        <button id="btnDemoStop" class="mini-btn">停止演示</button>
       </div>
     </section>
 
@@ -334,6 +352,9 @@
 
         <!-- 智能：一句话修图 -->
         <section class="page" data-page="smart">
+          <button id="btnDemo" class="block-btn primary">一键演示（约 60 秒）</button>
+          <p class="hint">自动走一遍：一句话修图 → 电影 LUT → 人像虚化 → 抠图换背景 → 文字层投影 → 导出，随时可停。</p>
+          <div class="group-title">一句话修图</div>
           <p class="desc">用一句话说想怎么改，例如「让天空更蓝」「照片太暗了」「背景虚化，人物亮一点」。全部在本机解析执行，不联网。</p>
           <textarea id="nlInput" rows="3" placeholder="例如：让天空更蓝，人像亮一点，背景虚化"></textarea>
           <button id="btnNLGo" class="block-btn primary">执行修图</button>
@@ -467,6 +488,7 @@
 <script src="js/masks.js"></script>
 <script src="js/nl.js"></script>
 <script src="js/nledit.js"></script>
+<script src="js/samples.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/app.js"></script>
 </body>

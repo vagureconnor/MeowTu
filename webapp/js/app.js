@@ -2768,3 +2768,235 @@ sizeOverlay();
 drawCurve();
 refresh();
 if (editor) setStatus('就绪');
+
+/* ================================================================
+   展示打磨（新增，全部走新控件 + 既有公开路径，不改引擎语义）
+   ① 展示样片菜单 ② before/after 对比滑杆 ③ 一键演示
+   ================================================================ */
+
+/* ---------- ① 展示样片：MTSamples 程序绘制，载入走 editor.loadCanvas ---------- */
+async function loadSampleArt(id, skipConfirm) {
+  if (!editor || !window.MTSamples) { setStatus('样片模块未就绪'); return false; }
+  if (!skipConfirm && isDirty() && !await confirmDiscard()) { setStatus('已取消'); return false; }
+  const c = window.MTSamples.make(id);
+  if (!c) return false;
+  const ok = await call(() => editor.loadCanvas(c), '样片载入失败');
+  if (ok) {
+    const meta = window.MTSamples.list.find(s => s.id === id);
+    setStatus('已载入展示样片：' + (meta ? meta.name : id));
+    exitSelectMode();
+    snapshotFromCanvas();
+    exportedCounter = changeCounter;
+    syncUIFromEngine();
+    refresh();
+  }
+  return ok;
+}
+(function buildSampleMenu() {
+  const btn = $('#btnSampleMenu');
+  if (!btn || !window.MTSamples) return;
+  const menu = document.createElement('div');
+  menu.id = 'sampleMenu'; menu.hidden = true;
+  const addItem = (label, thumbCanvas, fn) => {
+    const b = document.createElement('button');
+    b.className = 'sample-item';
+    if (thumbCanvas) b.appendChild(thumbCanvas);
+    const s = document.createElement('span');
+    s.className = 'si-name'; s.textContent = label;
+    b.appendChild(s);
+    b.addEventListener('click', () => { menu.hidden = true; fn(); });
+    menu.appendChild(b);
+    return b;
+  };
+  addItem('经典示例图', null, () => loadSample());
+  for (const s of window.MTSamples.list) {
+    const b = addItem('样片 · ' + s.name, null, () => loadSampleArt(s.id, false));
+    b.dataset.sample = s.id;
+    b.dataset.thumbPending = '1';
+  }
+  document.body.appendChild(menu);
+  let thumbsDone = false;
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (!menu.hidden) { menu.hidden = true; return; }
+    if (!thumbsDone) {           // 缩略图懒画一次：用样片原图缩小
+      thumbsDone = true;
+      menu.querySelectorAll('[data-thumb-pending]').forEach(b => {
+        const c = window.MTSamples.make(b.dataset.sample);
+        if (!c) return;
+        const t = document.createElement('canvas');
+        t.width = 168; t.height = 112;
+        t.getContext('2d').drawImage(c, 0, 0, t.width, t.height);
+        b.insertBefore(t, b.firstChild);
+        delete b.dataset.thumbPending;
+      });
+    }
+    const r = btn.getBoundingClientRect();
+    menu.hidden = false;
+    menu.style.left = Math.max(6, Math.min(r.left, innerWidth - 220)) + 'px';
+    menu.style.top = (r.bottom + 6) + 'px';
+  });
+  document.addEventListener('pointerdown', e => {
+    if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) menu.hidden = true;
+  });
+})();
+
+/* ---------- ② 对比滑杆：左 = 原图（origURL 快照），右 = 当前效果 ----------
+   compareCanvas 只在分界线左侧画原图、其余透明，底下的 editorCanvas 就是效果图；
+   重绘时机：引擎 state 事件 / 拖动 / 开关 / 窗口尺寸变化。与「按住对比」互不影响。 */
+const cmpCv = $('#compareCanvas'), cmpCtx = cmpCv.getContext('2d'), cmpBar = $('#compareBar');
+let cmpOn = false, cmpPos = 0.5, cmpImg = null, cmpImgURL = null;
+function drawCompare() {
+  if (!cmpOn) return;
+  const w = editorCanvas.width, h = editorCanvas.height;
+  if (!w || !h || !origURL) return;
+  if (cmpImgURL !== origURL) {
+    cmpImgURL = origURL; cmpImg = null;
+    const im = new Image();
+    im.onload = () => { if (cmpImgURL === origURL) { cmpImg = im; drawCompare(); } };
+    im.src = origURL;
+  }
+  if (cmpCv.width !== w || cmpCv.height !== h) { cmpCv.width = w; cmpCv.height = h; }
+  cmpCtx.clearRect(0, 0, w, h);
+  if (cmpImg) {
+    const px = Math.round(w * cmpPos);
+    cmpCtx.save();
+    cmpCtx.beginPath(); cmpCtx.rect(0, 0, px, h); cmpCtx.clip();
+    cmpCtx.drawImage(cmpImg, 0, 0, w, h);
+    cmpCtx.restore();
+  }
+  cmpBar.style.left = (cmpPos * 100) + '%';
+}
+function setComparePos(f) {
+  cmpPos = Math.min(0.98, Math.max(0.02, f));
+  drawCompare();
+}
+function setCompare(on) {
+  if (on && !hasImg()) { setStatus('先打开一张图片'); return; }
+  cmpOn = on;
+  cmpCv.classList.toggle('on', on);
+  cmpBar.hidden = !on;
+  $('#btnCompareSlider').classList.toggle('active', on);
+  if (on) { drawCompare(); setStatus('对比滑杆：左边原图、右边效果，拖动中间的圆钮移动分界线'); }
+}
+$('#btnCompareSlider').addEventListener('click', () => setCompare(!cmpOn));
+(function cmpDrag() {
+  let dragging = false;
+  const posFromEvent = e => {
+    const r = editorCanvas.getBoundingClientRect();
+    return r.width ? (e.clientX - r.left) / r.width : cmpPos;
+  };
+  cmpBar.addEventListener('pointerdown', e => {
+    dragging = true;
+    cmpBar.setPointerCapture(e.pointerId);
+    setComparePos(posFromEvent(e));
+    e.preventDefault();
+  });
+  cmpBar.addEventListener('pointermove', e => { if (dragging) setComparePos(posFromEvent(e)); });
+  ['pointerup', 'pointercancel'].forEach(ev => cmpBar.addEventListener(ev, () => { dragging = false; }));
+})();
+if (editor && typeof editor.on === 'function') {
+  try { editor.on('state', () => { if (cmpOn) drawCompare(); }); } catch (e) { /* 忽略 */ }
+}
+window.addEventListener('resize', drawCompare);
+window.MTCompare = { setPos: setComparePos, pos: () => cmpPos, on: () => cmpOn, set: setCompare };
+
+/* ---------- ③ 一键演示：预设脚本走真实按钮/API 路径，每步字幕说明，可随时停 ---------- */
+let demo = null;   // { stop:bool, step:int }
+const demoSleep = ms => new Promise(r => setTimeout(r, ms));
+async function demoWait(ms) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (!demo || demo.stop) throw new Error('demo-stop');
+    await demoSleep(120);
+  }
+}
+async function demoWaitFor(fn, timeout, what) {
+  const t0 = Date.now();
+  while (!fn()) {
+    if (!demo || demo.stop) throw new Error('demo-stop');
+    if (Date.now() - t0 > timeout) throw new Error('演示等待超时：' + what);
+    await demoSleep(150);
+  }
+}
+function sayNl(text) {
+  switchTab('smart');
+  const inp = $('#nlInput');
+  inp.value = text;
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+}
+const DEMO_STEPS = [
+  { cap: '第 1 步：载入「风景」展示样片（程序绘制：天空、远山、湖面、草地）', run: async () => { await loadSampleArt('landscape', true); } },
+  { cap: '第 2 步：一句话修图 ——「让天空更蓝，照片更有电影感」，本机解析、按区域执行', run: async () => {
+      sayNl('让天空更蓝，照片更有电影感'); await demoWait(700); $('#btnNLGo').click(); } },
+  { cap: '第 3 步：再套一层电影调色 LUT「青橙」（悬停可预览、点选即生效）', run: async () => {
+      switchTab('filters'); await demoWait(400);
+      const cell = $('.lut-cell[data-lut="tealOrange"]'); if (cell) cell.click(); } },
+  { cap: '第 4 步：换「人像」样片 —— 肤色人物 + 影棚背景', run: async () => { await loadSampleArt('portrait', true); } },
+  { cap: '第 5 步：一句话 ——「背景虚化，人物亮一点」，背景和人像分开处理', run: async () => {
+      sayNl('背景虚化，人物亮一点'); await demoWait(700); $('#btnNLGo').click(); } },
+  { cap: '第 6 步：框选抠图（GrabCut），再一键换上「蓝天白云」背景', run: async () => {
+      switchTab('cutout'); $('#btnCutMode').click(); await demoWait(500);
+      const s = imgSize(); if (!s) throw new Error('无人像样片');
+      selection = clampSel({ x: s.w * 0.27, y: s.h * 0.06, w: s.w * 0.46, h: s.h * 0.92 });
+      drawOverlay();
+      await demoWait(600);
+      $('#selOk').click();
+      await demoWaitFor(() => $('#busy').hidden, 30000, '抠图');
+      await demoWait(500);
+      const bg = $('#bgGrid [data-bg="sceneSky"]'); if (bg) bg.click(); } },
+  { cap: '第 7 步：新建图层写上「喵图 MeowTu」，再给文字层加投影', run: async () => {
+      switchTab('layers'); $('#btnLayerAdd').click(); await demoWait(500);
+      switchTab('text');
+      $('#inText').value = '喵图 MeowTu';
+      $('#inTextSize').value = 76;
+      $('#inTextColor').value = '#ffffff';
+      $('#chkTextBold').checked = true;
+      $('#btnAddText').click(); await demoWait(400);
+      $('#btnCommitTexts').click();
+      await demoWaitFor(() => !$('#textList').children.length, 8000, '文字应用');
+      switchTab('layers'); $('#btnLayerStyle').click(); await demoWait(600);
+      const grp = Array.from($('#styleDlgBody').querySelectorAll('.adj-group'))
+        .find(gr => gr.querySelector('.adj-head span') && gr.querySelector('.adj-head span').textContent === '投影');
+      if (!grp) throw new Error('样式对话框没有投影项');
+      const cb = grp.querySelector('.adj-head input[type="checkbox"]');
+      if (cb && !cb.checked) cb.click();
+      await demoWait(600);
+      $('#sdApply').click(); } },
+  { cap: '第 8 步：打开导出对话框收尾 —— 格式、质量、缩放、体积预估一目了然', run: async () => {
+      $('#btnExportDlg').click(); await demoWait(400); } },
+];
+async function startDemo() {
+  if (demo && !demo.stop) return;
+  if (!editor) { setStatus('编辑引擎未就绪'); return; }
+  demo = { stop: false, step: -1 };
+  $('#demoBar').hidden = false;
+  $('#btnDemo').disabled = true;
+  try {
+    for (let i = 0; i < DEMO_STEPS.length; i++) {
+      demo.step = i;
+      $('#demoCaption').textContent = DEMO_STEPS[i].cap;
+      await demoWait(650);
+      await DEMO_STEPS[i].run();
+      await demoWait(2000);
+    }
+    demo.step = DEMO_STEPS.length;
+    $('#demoCaption').textContent = '演示完成：一句话修图、LUT 调色、区域虚化、抠图换背景、文字层投影、导出 —— 全程真实功能';
+    setStatus('一键演示完成');
+    await demoSleep(3200);
+  } catch (e) {
+    if (!e || e.message !== 'demo-stop') setStatus('演示中断：' + (e && e.message ? e.message : '未知错误'));
+    else setStatus('演示已停止');
+  }
+  $('#demoBar').hidden = true;
+  $('#btnDemo').disabled = false;
+  demo = null;
+}
+function stopDemo() { if (demo) demo.stop = true; }
+$('#btnDemo').addEventListener('click', startDemo);
+$('#btnDemoStop').addEventListener('click', stopDemo);
+window.MTDemo = {
+  start: startDemo, stop: stopDemo,
+  info: () => ({ running: !!demo, step: demo ? demo.step : -1, caption: $('#demoCaption').textContent }),
+  loadSampleArt,
+};
