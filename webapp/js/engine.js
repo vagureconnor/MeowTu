@@ -433,6 +433,43 @@
     return c;
   }
 
+  // ---------------- 透视：单应矩阵求解（8 元线性方程组，高斯消元） ----------------
+
+  /** 求把 src 四点映到 dst 四点的单应矩阵（行主序 9 元，最后一元归一为 1）。 */
+  function solveHomography(src, dst) {
+    var A = [], b = [];
+    for (var i = 0; i < 4; i++) {
+      var x = src[i].x, y = src[i].y, u = dst[i].x, v = dst[i].y;
+      A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
+      A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
+    }
+    var n = 8;
+    for (var col = 0; col < n; col++) {
+      var piv = col;
+      for (var r = col + 1; r < n; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+      if (Math.abs(A[piv][col]) < 1e-12) return null;
+      if (piv !== col) { var ta = A[piv]; A[piv] = A[col]; A[col] = ta; var tb = b[piv]; b[piv] = b[col]; b[col] = tb; }
+      for (var r2 = 0; r2 < n; r2++) {
+        if (r2 === col) continue;
+        var f = A[r2][col] / A[col][col];
+        if (f === 0) continue;
+        for (var c2 = col; c2 < n; c2++) A[r2][c2] -= f * A[col][c2];
+        b[r2] -= f * b[col];
+      }
+    }
+    var H = [];
+    for (var i2 = 0; i2 < n; i2++) H.push(b[i2] / A[i2][i2]);
+    H.push(1);
+    return H;
+  }
+
+  /** 双线性采样用的单点读取（坐标钳制到图内）。 */
+  function samplePx(data, w, h, x, y, ch) {
+    var cx = x < 0 ? 0 : (x >= w ? w - 1 : x);
+    var cy = y < 0 ? 0 : (y >= h ? h - 1 : y);
+    return data[(cy * w + cx) * 4 + ch];
+  }
+
   // ---------------- 滤镜调用的抽样校验和（判断 MTFilters 是否改了像素） ----------------
 
   function sampleChecksum(data) {
@@ -454,6 +491,7 @@
     var texts = [];
     var undoStack = [], redoStack = [];
     var stateListeners = [];
+    var lastSettled = null;   // 上一个「已安定」状态快照（调节检查点用）
 
     function emitState() {
       var s = {
@@ -492,16 +530,62 @@
       emitState();
     }
 
-    /** 通用提交（移植 commitImage）：旧 base 入撤销栈（上限 12）、清重做栈、换新 base。 */
+    /** 完整状态快照：像素 + 调节参数 + 曲线 + 文字。撤销/重做恢复的是整套状态，
+     *  这样滑杆数值、曲线点、未应用文字在撤销后都能原样回来（数值永远等于效果）。 */
+    function snapshotState() {
+      var curves = {};
+      for (var i = 0; i < CURVE_KEYS.length; i++) {
+        curves[CURVE_KEYS[i]] = curvePts[CURVE_KEYS[i]].map(function (p) { return p.slice(); });
+      }
+      var p = {};
+      for (var j = 0; j < PARAM_DEFS.length; j++) p[PARAM_DEFS[j][0]] = params[PARAM_DEFS[j][0]];
+      return {
+        base: base ? cloneCanvas(base) : null,
+        params: p,
+        curves: curves,
+        texts: texts.map(function (t) { var o = {}; for (var k in t) o[k] = t[k]; return o; })
+      };
+    }
+
+    function restoreState(s) {
+      base = s.base;
+      params = freshParams();
+      for (var i = 0; i < PARAM_DEFS.length; i++) params[PARAM_DEFS[i][0]] = s.params[PARAM_DEFS[i][0]] || 0;
+      curvePts = freshCurvePoints();
+      for (var j = 0; j < CURVE_KEYS.length; j++) {
+        curvePts[CURVE_KEYS[j]] = s.curves[CURVE_KEYS[j]].map(function (p) { return p.slice(); });
+      }
+      curveLuts = combinedCurveLuts(curvePts);
+      texts = s.texts.map(function (t) { var o = {}; for (var k in t) o[k] = t[k]; return o; });
+      refreshPreviewSrc();
+      render();
+      lastSettled = snapshotState();
+    }
+
+    /** 当前完整效果的全分辨率合成：base + 调节 + 曲线 + 文字（所见即所得）。 */
+    function bakeCurrent() {
+      var out = runPipeline(base, params, curveLuts);
+      if (out === base) out = cloneCanvas(base);
+      if (texts.length) drawTexts(out.getContext('2d'), texts, 1);
+      return out;
+    }
+
+    /** 通用提交：旧状态整套入撤销栈（上限 12）、清重做栈、换新 base，
+     *  待生效的调节/曲线/文字随本次提交一并归零（它们已包含在新 base 里）。 */
     function commitImage(newBase) {
       if (base) {
-        undoStack.push(cloneCanvas(base));
+        undoStack.push(snapshotState());
         while (undoStack.length > HISTORY_MAX) undoStack.shift();
       }
       redoStack.length = 0;
       base = newBase;
+      params = freshParams();
+      curvePts = freshCurvePoints();
+      curveLuts = null;
+      texts = [];
       refreshPreviewSrc();
       render();
+      lastSettled = snapshotState();
     }
 
     /** 载入新图（打开/示例图）：清历史、清全部预览状态（移植 openImage / makeSampleImage 的状态清理）。 */
@@ -515,6 +599,7 @@
       texts = [];
       refreshPreviewSrc();
       render();
+      lastSettled = snapshotState();
     }
 
     function drawSourceToBase(source, w, h) {
@@ -602,15 +687,38 @@
         return p;
       },
 
-      /** 把当前调节+曲线烘焙进 base 并推撤销栈，参数与曲线归零（移植 commitAdjust+commitCurves 的合并语义）。 */
+      /** 把当前调节+曲线+文字烘焙进 base 并推撤销栈（一步）。
+       *  网页版界面不再在松手时调用它——滑杆/曲线是常驻的，数值即效果；
+       *  只保留给显式「合并」语义与兼容调用。 */
       commitAdjust: function () {
         if (!base) return false;
-        if (paramsIsIdentity(params) && !curveLuts) { render(); return false; }
-        var out = runPipeline(base, params, curveLuts);
-        params = freshParams();
-        curvePts = freshCurvePoints();
-        curveLuts = null;
-        commitImage(out);
+        if (paramsIsIdentity(params) && !curveLuts && !texts.length) { render(); return false; }
+        commitImage(bakeCurrent());
+        return true;
+      },
+
+      /** 调节检查点：滑杆松手/曲线拖完时调用。若调节或曲线与上个安定状态不同，
+       *  把安定状态存入撤销栈——这样 Ctrl+Z 能逐步撤销调节，数值本身始终常驻不归零。 */
+      checkpointAdjust: function () {
+        if (!base || !lastSettled) return false;
+        var same = true;
+        for (var i = 0; i < PARAM_DEFS.length && same; i++) {
+          var key = PARAM_DEFS[i][0];
+          if (params[key] !== lastSettled.params[key]) same = false;
+        }
+        for (var j = 0; j < CURVE_KEYS.length && same; j++) {
+          var a = curvePts[CURVE_KEYS[j]], b = lastSettled.curves[CURVE_KEYS[j]];
+          if (a.length !== b.length) { same = false; break; }
+          for (var k = 0; k < a.length; k++) {
+            if (a[k][0] !== b[k][0] || a[k][1] !== b[k][1]) { same = false; break; }
+          }
+        }
+        if (same) return false;
+        undoStack.push(lastSettled);
+        while (undoStack.length > HISTORY_MAX) undoStack.shift();
+        redoStack.length = 0;
+        lastSettled = snapshotState();
+        emitState();
         return true;
       },
 
@@ -653,7 +761,7 @@
         if (!base) return false;
         var F = window.MTFilters;
         if (!F || typeof F.apply !== 'function') return false; // 不存在时静默跳过
-        var work = cloneCanvas(base);
+        var work = bakeCurrent(); // 滤镜作用在当前所见效果上（调节/曲线/文字先合并）
         var wctx = work.getContext('2d', { willReadFrequently: true });
         var handled = false;
         // 先试 ImageData 约定：返回新 ImageData 或原地改像素都认
@@ -683,8 +791,9 @@
       rotate90: function (dir) {
         if (!base) return false;
         var cw = !(dir === -1 || dir === 'ccw' || dir === false);
-        var w = base.width, h = base.height;
-        var srcCtx = base.getContext('2d', { willReadFrequently: true });
+        var srcB = bakeCurrent();
+        var w = srcB.width, h = srcB.height;
+        var srcCtx = srcB.getContext('2d', { willReadFrequently: true });
         var sd = srcCtx.getImageData(0, 0, w, h).data;
         var out = makeCanvas(h, w);
         var octx = out.getContext('2d');
@@ -706,22 +815,24 @@
 
       flipH: function () {
         if (!base) return false;
-        var out = makeCanvas(base.width, base.height);
+        var srcH = bakeCurrent();
+        var out = makeCanvas(srcH.width, srcH.height);
         var ctx = out.getContext('2d');
-        ctx.translate(base.width, 0);
+        ctx.translate(srcH.width, 0);
         ctx.scale(-1, 1);
-        ctx.drawImage(base, 0, 0);
+        ctx.drawImage(srcH, 0, 0);
         commitImage(out);
         return true;
       },
 
       flipV: function () {
         if (!base) return false;
-        var out = makeCanvas(base.width, base.height);
+        var srcV = bakeCurrent();
+        var out = makeCanvas(srcV.width, srcV.height);
         var ctx = out.getContext('2d');
-        ctx.translate(0, base.height);
+        ctx.translate(0, srcV.height);
         ctx.scale(1, -1);
-        ctx.drawImage(base, 0, 0);
+        ctx.drawImage(srcV, 0, 0);
         commitImage(out);
         return true;
       },
@@ -731,11 +842,13 @@
         w = Math.max(1, Math.round(w));
         h = Math.max(1, Math.round(h));
         if (!isFinite(w) || !isFinite(h)) return false;
+        // 护栏：超大尺寸会让浏览器直接崩溃，先拦下来
+        if (w > 12000 || h > 12000 || w * h > 100000000) return false;
         var out = makeCanvas(w, h);
         var ctx = out.getContext('2d');
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(base, 0, 0, w, h);
+        ctx.drawImage(bakeCurrent(), 0, 0, w, h);
         commitImage(out);
         return true;
       },
@@ -747,9 +860,63 @@
         var x1 = Math.min(base.width, Math.ceil(x + w)), y1 = Math.min(base.height, Math.ceil(y + h));
         if (x1 - x0 <= 0 || y1 - y0 <= 0) return false;
         var out = makeCanvas(x1 - x0, y1 - y0);
-        out.getContext('2d').drawImage(base, x0, y0, x1 - x0, y1 - y0, 0, 0, x1 - x0, y1 - y0);
+        out.getContext('2d').drawImage(bakeCurrent(), x0, y0, x1 - x0, y1 - y0, 0, 0, x1 - x0, y1 - y0);
         commitImage(out);
         return true;
+      },
+
+      /** 透视矫正：quad 为原图坐标的四个角 [左上, 右上, 右下, 左下]，
+       *  把四边形区域拉直成矩形（单应变换逆映射 + 双线性采样）。 */
+      warpPerspective: function (quad) {
+        if (!base || !quad || quad.length !== 4) return false;
+        var src = bakeCurrent();
+        var W = src.width, H = src.height;
+        function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+        var outW = Math.round(Math.max(dist(quad[0], quad[1]), dist(quad[3], quad[2])));
+        var outH = Math.round(Math.max(dist(quad[0], quad[3]), dist(quad[1], quad[2])));
+        if (outW < 8 || outH < 8 || outW > 12000 || outH > 12000 || outW * outH > 100000000) return false;
+        var Hm = solveHomography(
+          [{ x: 0, y: 0 }, { x: outW, y: 0 }, { x: outW, y: outH }, { x: 0, y: outH }], quad);
+        if (!Hm) return false;
+        var sd = src.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+        var out = makeCanvas(outW, outH);
+        var octx = out.getContext('2d');
+        var img = octx.createImageData(outW, outH);
+        var dd = img.data;
+        for (var y = 0; y < outH; y++) {
+          for (var x = 0; x < outW; x++) {
+            var wgt = Hm[6] * x + Hm[7] * y + 1;
+            var sx = (Hm[0] * x + Hm[1] * y + Hm[2]) / wgt;
+            var sy = (Hm[3] * x + Hm[4] * y + Hm[5]) / wgt;
+            var x0 = Math.floor(sx), y0 = Math.floor(sy);
+            var fx = sx - x0, fy = sy - y0;
+            var di = (y * outW + x) * 4;
+            for (var ch = 0; ch < 4; ch++) {
+              var v = 0;
+              v += samplePx(sd, W, H, x0, y0, ch) * (1 - fx) * (1 - fy);
+              v += samplePx(sd, W, H, x0 + 1, y0, ch) * fx * (1 - fy);
+              v += samplePx(sd, W, H, x0, y0 + 1, ch) * (1 - fx) * fy;
+              v += samplePx(sd, W, H, x0 + 1, y0 + 1, ch) * fx * fy;
+              dd[di + ch] = Math.round(v);
+            }
+          }
+        }
+        octx.putImageData(img, 0, 0);
+        commitImage(out);
+        return true;
+      },
+
+      /** 把外部算好的画布作为一步可撤销操作应用（抠图结果回灌用）。 */
+      applyCanvas: function (canvas) {
+        if (!base || !canvas || !canvas.width) return false;
+        commitImage(cloneCanvas(canvas));
+        return true;
+      },
+
+      /** 当前完整效果的全分辨率画布（不改变任何状态；抠图取输入用）。 */
+      renderFullCanvas: function () {
+        if (!base) return null;
+        return bakeCurrent();
       },
 
       // ----- 文字 -----
@@ -772,13 +939,10 @@
         });
       },
 
-      /** 把文字按原图坐标全分辨率烘焙进 base（移植 rasterizeTexts），随后清空文字列表。 */
+      /** 把当前效果（含文字）全分辨率烘焙进 base（移植 rasterizeTexts 的合并语义），随后清空文字列表。 */
       commitTexts: function () {
         if (!base || !texts.length) return false;
-        var out = cloneCanvas(base);
-        drawTexts(out.getContext('2d'), texts, 1);
-        texts = [];
-        commitImage(out);
+        commitImage(bakeCurrent());
         return true;
       },
 
@@ -786,20 +950,16 @@
 
       undo: function () {
         if (!undoStack.length) return false;
-        redoStack.push(cloneCanvas(base));
-        base = undoStack.pop();
-        refreshPreviewSrc();
-        render();
+        redoStack.push(snapshotState());
+        restoreState(undoStack.pop());
         return true;
       },
 
       redo: function () {
         if (!redoStack.length) return false;
-        undoStack.push(cloneCanvas(base));
+        undoStack.push(snapshotState());
         while (undoStack.length > HISTORY_MAX) undoStack.shift();
-        base = redoStack.pop();
-        refreshPreviewSrc();
-        render();
+        restoreState(redoStack.pop());
         return true;
       },
 

@@ -63,7 +63,7 @@
         <svg viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.4"/><circle cx="6" cy="17" r="2.4"/><path d="M8.1 8.9 20 19M8.1 15.1 20 5"/></svg>
         <span>抠图</span>
       </button>
-      <button class="tool" data-tool="perspective" title="透视矫正（即将上线）">
+      <button class="tool" data-tool="perspective" title="透视矫正：拖动四个角把拍歪的画面拉直">
         <svg viewBox="0 0 24 24"><path d="M5.5 4.5h13l2 15h-17z"/><path d="M12 4.5 11 19.5M5.8 12h12.4"/></svg>
         <span>透视</span>
       </button>
@@ -87,6 +87,7 @@
       <!-- 选框模式（裁剪/抠图）浮动确认条 -->
       <div id="selBar" hidden>
         <span id="selHint">拖出选框</span>
+        <span id="selInfo"></span>
         <button id="selCancel" class="mini-btn">
           <svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5 5 19"/></svg>取消
         </button>
@@ -168,6 +169,9 @@
           <div class="group-title">裁剪</div>
           <button id="btnCropMode" class="block-btn">进入裁剪模式</button>
           <p class="hint">进入后在图片上拖出选框，点「确认」完成裁剪。</p>
+          <div class="group-title">透视矫正</div>
+          <button id="btnPerspMode" class="block-btn">进入透视矫正</button>
+          <p class="hint">把四个角拖到拍歪的文档/画框四角，点「确认」拉直。</p>
         </section>
 
         <!-- 文字 -->
@@ -220,6 +224,18 @@
     <a href="java.html" style="color:#8a94a6;text-decoration:none;white-space:nowrap" title="在浏览器里运行 Java 原版（加载较慢）">Java 原版</a>
     <span id="sizeInfo"></span>
   </footer>
+</div>
+
+<!-- 放弃未导出修改的确认框 -->
+<div id="confirmDlg" hidden>
+  <div class="cf-card">
+    <p class="cf-title">放弃现在的修改？</p>
+    <p class="cf-text">当前图片有还没导出的修改，打开新图会把它们全部丢弃。</p>
+    <div class="cf-btns">
+      <button id="cfCancel" class="mini-btn">继续编辑</button>
+      <button id="cfOk" class="mini-btn ok">丢弃并打开</button>
+    </div>
+  </div>
 </div>
 
 <input id="fileInput" type="file" accept="image/*" hidden>

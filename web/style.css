@@ -117,6 +117,23 @@ svg{display:block}
 }
 #selBar[hidden]{display:none}
 #selHint{font-size:13px;color:var(--muted)}
+#selInfo{font-size:13px;color:var(--text);font-variant-numeric:tabular-nums}
+
+/* 放弃修改确认框 */
+#confirmDlg{
+  position:fixed;inset:0;z-index:50;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(12,12,12,.6);padding:20px;
+}
+#confirmDlg[hidden]{display:none}
+.cf-card{
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:20px 22px;max-width:360px;width:100%;
+  box-shadow:0 16px 48px rgba(0,0,0,.55);
+}
+.cf-title{font-size:16.5px;font-weight:600;margin:0 0 8px}
+.cf-text{font-size:14px;color:var(--muted);line-height:1.55;margin:0 0 16px}
+.cf-btns{display:flex;gap:10px;justify-content:flex-end}
 .mini-btn{
   display:inline-flex;align-items:center;gap:5px;
   min-height:34px;padding:0 13px;border-radius:999px;

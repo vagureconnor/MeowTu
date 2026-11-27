@@ -55,30 +55,114 @@ function setOrig(url) {
 function snapshotFromCanvas() {
   try { setOrig(editorCanvas.toDataURL('image/png')); } catch (e) { /* 忽略 */ }
 }
-/* 离散操作（滤镜/几何/裁剪等）完成后：刷新快照与界面 */
+/* ---- 修改追踪：有没有未导出的修改（打开新图/关页前提醒用） ---- */
+let changeCounter = 0;
+let exportedCounter = 0;
+function bumpChange() { changeCounter++; }
+function hasPendingEdits() {
+  if (texts.length > 0) return true;
+  for (const k in sliderEls) if (parseFloat(sliderEls[k].input.value) !== 0) return true;
+  for (const ch of ['rgb', 'r', 'g', 'b']) {
+    const p = curveState.points[ch];
+    if (p.length !== 2 || p[0][0] !== 0 || p[0][1] !== 0 || p[1][0] !== 255 || p[1][1] !== 255) return true;
+  }
+  return false;
+}
+function isDirty() {
+  if (!hasImg()) return false;
+  if (changeCounter === exportedCounter) return false;
+  return (lastState && lastState.canUndo) || hasPendingEdits();
+}
+/* 自制确认框（放弃未导出修改？） */
+let confirmResolve = null;
+function confirmDiscard() {
+  return new Promise(res => {
+    confirmResolve = res;
+    $('#confirmDlg').hidden = false;
+  });
+}
+function settleConfirm(v) {
+  $('#confirmDlg').hidden = true;
+  if (confirmResolve) confirmResolve(v);
+  confirmResolve = null;
+}
+window.addEventListener('beforeunload', e => {
+  if (isDirty()) { e.preventDefault(); e.returnValue = ''; }
+});
+
+/* 把界面三套状态（滑杆/曲线/文字列表）与引擎当前状态对齐。
+   离散操作后引擎会把待生效项合并归零、撤销/重做会恢复整套状态，
+   界面必须跟着同步，否则数值和效果对不上。 */
+function syncUIFromEngine() {
+  if (!editor) return;
+  try {
+    const p = typeof editor.getAdjust === 'function' ? editor.getAdjust() : null;
+    if (p) {
+      for (const k in sliderEls) {
+        const s = sliderEls[k];
+        const v = typeof p[k] === 'number' ? p[k] : 0;
+        s.input.value = v;
+        s.val.textContent = s.def.step < 1 ? v.toFixed(2) : String(Math.round(v));
+      }
+    }
+  } catch (e) { /* 忽略 */ }
+  try {
+    const cv = typeof editor.getCurves === 'function' ? editor.getCurves() : null;
+    if (cv) {
+      for (const ch of ['rgb', 'r', 'g', 'b']) {
+        if (Array.isArray(cv[ch])) curveState.points[ch] = cv[ch].map(pt => [pt[0], pt[1]]);
+      }
+      curveSel = -1;
+      drawCurve();
+    }
+  } catch (e) { /* 忽略 */ }
+  try {
+    const ts = typeof editor.getTexts === 'function' ? editor.getTexts() : null;
+    if (ts) {
+      texts = ts.map(t => ({ id: ++textSeq, text: t.text, x: t.x, y: t.y, size: t.size, color: t.color, bold: t.bold }));
+      renderTextList();
+    }
+  } catch (e) { /* 忽略 */ }
+}
+
+/* 离散操作（滤镜/几何/裁剪/撤销等）完成后：同步界面状态与刷新。
+   注意：这里不再刷新原图快照——对比要看的永远是刚打开时的原图。 */
 function afterOp(label) {
   if (label) setStatus(label);
-  setTimeout(() => { snapshotFromCanvas(); refresh(); }, 80);
+  bumpChange();
+  syncUIFromEngine();
+  setTimeout(() => { refresh(); }, 80);
 }
 
 /* ---------------- 打开图片：选文件 / 拖拽 / 粘贴 ---------------- */
 async function loadFile(file) {
   if (!editor || !file) return;
   if (file.type && !file.type.startsWith('image/')) { setStatus('这不是图片文件'); return; }
+  if (isDirty() && !await confirmDiscard()) { setStatus('已取消打开'); return; }
   setStatus('正在打开 ' + (file.name || '图片') + '…');
   const ok = await call(() => editor.loadFile(file), '打开失败');
   if (ok) {
     try { setOrig(URL.createObjectURL(file)); } catch (e) { snapshotFromCanvas(); }
     setStatus('已打开 ' + (file.name || '图片'));
     exitSelectMode();
+    exportedCounter = changeCounter;
+    syncUIFromEngine();
     refresh();
   }
 }
 async function loadSample() {
   if (!editor) { setStatus('编辑引擎未就绪'); return; }
+  if (isDirty() && !await confirmDiscard()) { setStatus('已取消'); return; }
   setStatus('正在生成示例图…');
   const ok = await call(() => editor.newSample(), '示例图生成失败');
-  if (ok) { setStatus('示例图已生成，可以开始试用各功能'); exitSelectMode(); afterOp(); }
+  if (ok) {
+    setStatus('示例图已生成，可以开始试用各功能');
+    exitSelectMode();
+    snapshotFromCanvas();
+    exportedCounter = changeCounter;
+    syncUIFromEngine();
+    refresh();
+  }
 }
 
 $('#btnOpen').addEventListener('click', () => fileInput.click());
@@ -165,7 +249,7 @@ function setTool(name) {
   if (name === 'crop') { switchTab('geometry'); if (hasImg()) enterSelectMode('crop'); else setStatus('先打开一张图片，再裁剪'); }
   else if (name === 'text') switchTab('text');
   else if (name === 'cutout') { switchTab('cutout'); }
-  else if (name === 'perspective') setStatus('透视矫正即将上线，先用裁剪和旋转试试');
+  else if (name === 'perspective') { switchTab('geometry'); if (hasImg()) enterPerspectiveMode(); else setStatus('先打开一张图片，再做透视矫正'); }
   else switchTab(currentTab); // browse：保持当前标签
 }
 $$('.tool').forEach(t => t.addEventListener('click', () => setTool(t.dataset.tool)));
@@ -175,14 +259,15 @@ $('#btnUndo').addEventListener('click', async () => { if (await call(() => edito
 $('#btnRedo').addEventListener('click', async () => { if (await call(() => editor.redo(), '重做失败')) afterOp('已重做'); });
 
 /* ---------------- 选框模式（裁剪 / 抠图共用）与文字拖动 ---------------- */
-let mode = 'browse';           // browse | crop | cutout | text
-let selection = null;          // 图像坐标 {x,y,w,h}
+let mode = 'browse';           // browse | crop | cutout | text | persp
+let selection = null;          // 原图坐标 {x,y,w,h}
+let perspQuad = null;          // 透视四角（原图坐标）[左上,右上,右下,左下]
 let dragInfo = null;           // 拖动过程状态
 
 function setMode(m) {
   mode = m;
   overlay.style.pointerEvents = (m === 'browse') ? 'none' : 'auto';
-  overlay.style.cursor = (m === 'crop' || m === 'cutout') ? 'crosshair' : 'default';
+  overlay.style.cursor = (m === 'crop' || m === 'cutout') ? 'crosshair' : (m === 'persp' ? 'move' : 'default');
 }
 setMode('browse');
 
@@ -190,19 +275,50 @@ function enterSelectMode(m) {
   if (!hasImg()) { setStatus('先打开一张图片'); return; }
   setMode(m);
   selection = null;
+  perspQuad = null;
   $('#selHint').textContent = m === 'crop' ? '拖出要保留的区域' : '拖出要抠的主体';
+  $('#selInfo').textContent = '';
   $('#selBar').hidden = false;
   sizeOverlay(); drawOverlay();
   setStatus(m === 'crop' ? '裁剪：在图片上拖出选框，点确认完成' : '抠图：在图片上拖出选框，点确认开始');
 }
+function enterPerspectiveMode() {
+  if (!hasImg()) { setStatus('先打开一张图片'); return; }
+  const s = imgSize();
+  if (!s) return;
+  setMode('persp');
+  selection = null;
+  perspQuad = [
+    { x: 0, y: 0 }, { x: s.w, y: 0 }, { x: s.w, y: s.h }, { x: 0, y: s.h }
+  ];
+  $('#selHint').textContent = '拖动四个角，对准要拉直的区域';
+  $('#selBar').hidden = false;
+  sizeOverlay(); drawOverlay();
+  setStatus('透视矫正：拖动四个角点，点确认拉直');
+}
 function exitSelectMode() {
-  if (mode === 'crop' || mode === 'cutout') setMode(currentTab === 'text' ? 'text' : 'browse');
-  selection = null; dragInfo = null;
+  if (mode === 'crop' || mode === 'cutout' || mode === 'persp') setMode(currentTab === 'text' ? 'text' : 'browse');
+  selection = null; perspQuad = null; dragInfo = null;
   $('#selBar').hidden = true;
   clearOverlay();
 }
 $('#selCancel').addEventListener('click', () => { exitSelectMode(); setStatus('已取消'); });
 $('#selOk').addEventListener('click', () => {
+  if (mode === 'persp') {
+    if (!perspQuad) return;
+    // 四边形不能自交：相邻边叉积必须同号（凸四边形）
+    let sign = 0, okQuad = true;
+    for (let i = 0; i < 4; i++) {
+      const a = perspQuad[i], b = perspQuad[(i + 1) % 4], c = perspQuad[(i + 2) % 4];
+      const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+      if (cross === 0) { okQuad = false; break; }
+      const s = cross > 0 ? 1 : -1;
+      if (sign === 0) sign = s; else if (s !== sign) { okQuad = false; break; }
+    }
+    if (!okQuad) { setStatus('四个角的位置不对：请让四边形不要交叉、不要凹进去'); return; }
+    runPerspective(perspQuad.map(p => ({ x: p.x, y: p.y })));
+    return;
+  }
   if (!selection || selection.w < 4 || selection.h < 4) { setStatus('先在图片上拖出选框'); return; }
   const sel = { x: Math.round(selection.x), y: Math.round(selection.y), w: Math.round(selection.w), h: Math.round(selection.h) };
   if (mode === 'crop') {
@@ -212,21 +328,42 @@ $('#selOk').addEventListener('click', () => {
     runGrabCut(sel);
   }
 });
+function runPerspective(quad) {
+  exitSelectMode();
+  $('#busyText').textContent = '正在做透视矫正…';
+  $('#busy').hidden = false;
+  setTimeout(async () => {
+    const ok = await call(() => editor.warpPerspective(quad), '透视矫正失败');
+    $('#busy').hidden = true;
+    if (ok) afterOp('透视矫正完成');
+  }, 60);
+}
 
-/* 画布坐标换算：事件坐标 <-> 图像坐标 */
+/* 画布坐标换算：事件坐标 <-> 原图坐标。
+   注意必须换算到原图（全分辨率）坐标：显示画布是降采样预览，
+   大图上用预览坐标裁剪/放文字会整体错位。 */
 function toImage(e) {
   const r = editorCanvas.getBoundingClientRect();
-  if (!r.width || !editorCanvas.width) return { x: 0, y: 0 };
+  const s = imgSize();
+  if (!r.width || !s) return { x: 0, y: 0 };
   return {
-    x: (e.clientX - r.left) * editorCanvas.width / r.width,
-    y: (e.clientY - r.top) * editorCanvas.height / r.height
+    x: (e.clientX - r.left) * s.w / r.width,
+    y: (e.clientY - r.top) * s.h / r.height
   };
 }
 function clampSel(s) {
-  const W = editorCanvas.width, H = editorCanvas.height;
+  const sz = imgSize();
+  const W = sz ? sz.w : editorCanvas.width, H = sz ? sz.h : editorCanvas.height;
   s.x = Math.max(0, Math.min(s.x, W)); s.y = Math.max(0, Math.min(s.y, H));
   s.w = Math.max(0, Math.min(s.w, W - s.x)); s.h = Math.max(0, Math.min(s.h, H - s.y));
   return s;
+}
+function clampPoint(p) {
+  const sz = imgSize();
+  const W = sz ? sz.w : editorCanvas.width, H = sz ? sz.h : editorCanvas.height;
+  p.x = Math.max(0, Math.min(p.x, W));
+  p.y = Math.max(0, Math.min(p.y, H));
+  return p;
 }
 function sizeOverlay() {
   const r = wrap.getBoundingClientRect();
@@ -243,10 +380,40 @@ function drawOverlay() {
   const dpr = window.devicePixelRatio || 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, overlay.width, overlay.height);
-  if (!selection || !editorCanvas.width) return;
+  const sz = imgSize();
+  if (!sz || !editorCanvas.width) return;
   const cr = editorCanvas.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
   const ox = (cr.left - wr.left) * dpr, oy = (cr.top - wr.top) * dpr;
-  const sx = cr.width / editorCanvas.width * dpr, sy = cr.height / editorCanvas.height * dpr;
+  const sx = cr.width / sz.w * dpr, sy = cr.height / sz.h * dpr;
+  if (mode === 'persp' && perspQuad) {
+    const pts = perspQuad.map(p => ({ x: ox + p.x * sx, y: oy + p.y * sy }));
+    ctx.fillStyle = 'rgba(0,0,0,0.48)';
+    ctx.beginPath();
+    ctx.rect(ox, oy, cr.width * dpr, cr.height * dpr);
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.fill('evenodd');
+    ctx.strokeStyle = '#4da3ff'; ctx.lineWidth = 2 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath(); ctx.stroke();
+    for (const p of pts) {
+      ctx.beginPath(); ctx.arc(p.x, p.y, 11 * dpr, 0, Math.PI * 2);
+      ctx.fillStyle = '#4da3ff'; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5 * dpr; ctx.stroke();
+    }
+    const ow = Math.round(Math.max(Math.hypot(perspQuad[1].x - perspQuad[0].x, perspQuad[1].y - perspQuad[0].y),
+                                   Math.hypot(perspQuad[2].x - perspQuad[3].x, perspQuad[2].y - perspQuad[3].y)));
+    const oh = Math.round(Math.max(Math.hypot(perspQuad[3].x - perspQuad[0].x, perspQuad[3].y - perspQuad[0].y),
+                                   Math.hypot(perspQuad[2].x - perspQuad[1].x, perspQuad[2].y - perspQuad[1].y)));
+    $('#selInfo').textContent = '拉直后约 ' + ow + ' × ' + oh;
+    return;
+  }
+  if (!selection) return;
+  $('#selInfo').textContent = selection.w >= 1 && selection.h >= 1
+    ? '选区 ' + Math.round(selection.w) + ' × ' + Math.round(selection.h) : '';
   const x = ox + selection.x * sx, y = oy + selection.y * sy;
   const w = selection.w * sx, h = selection.h * sy;
   ctx.fillStyle = 'rgba(0,0,0,0.48)';
@@ -270,6 +437,21 @@ overlay.addEventListener('pointerdown', e => {
     dragInfo = { kind: 'select', ax: p.x, ay: p.y };
     selection = clampSel({ x: p.x, y: p.y, w: 0, h: 0 });
     overlay.setPointerCapture(e.pointerId);
+  } else if (mode === 'persp' && perspQuad) {
+    // 命中判定在显示像素空间做（半径 20px），与图分辨率无关
+    const cr = editorCanvas.getBoundingClientRect();
+    const sz = imgSize();
+    if (!sz) return;
+    let best = -1, bestD = 20;
+    perspQuad.forEach((q, i) => {
+      const qx = cr.left + q.x / sz.w * cr.width, qy = cr.top + q.y / sz.h * cr.height;
+      const d = Math.hypot(qx - e.clientX, qy - e.clientY);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    if (best >= 0) {
+      dragInfo = { kind: 'persp', idx: best };
+      overlay.setPointerCapture(e.pointerId);
+    }
   } else if (mode === 'text') {
     const t = hitText(p);
     if (t) {
@@ -287,6 +469,9 @@ overlay.addEventListener('pointermove', e => {
       w: Math.abs(p.x - dragInfo.ax), h: Math.abs(p.y - dragInfo.ay)
     });
     drawOverlay();
+  } else if (dragInfo.kind === 'persp' && perspQuad) {
+    perspQuad[dragInfo.idx] = clampPoint({ x: p.x, y: p.y });
+    drawOverlay();
   } else if (dragInfo.kind === 'text') {
     dragInfo.obj.x = Math.round(p.x - dragInfo.dx);
     dragInfo.obj.y = Math.round(p.y - dragInfo.dy);
@@ -295,52 +480,41 @@ overlay.addEventListener('pointermove', e => {
 });
 overlay.addEventListener('pointerup', () => { dragInfo = null; });
 overlay.addEventListener('pointercancel', () => { dragInfo = null; });
-new ResizeObserver(() => { sizeOverlay(); if (selection) drawOverlay(); }).observe(wrap);
+new ResizeObserver(() => { sizeOverlay(); if (selection || perspQuad) drawOverlay(); }).observe(wrap);
 
-/* ---------------- 抠图 ---------------- */
-function currentImageData() {
-  const c = document.createElement('canvas');
-  c.width = editorCanvas.width; c.height = editorCanvas.height;
-  const ctx = c.getContext('2d');
-  ctx.drawImage(editorCanvas, 0, 0);
-  return ctx.getImageData(0, 0, c.width, c.height);
-}
-function loadResultImage(res) {
-  // 结果可能是 ImageData / canvas / Blob，统一转成文件走 loadFile 回灌
-  let srcCanvas = null;
-  if (window.ImageData && res instanceof ImageData) {
-    srcCanvas = document.createElement('canvas');
-    srcCanvas.width = res.width; srcCanvas.height = res.height;
-    srcCanvas.getContext('2d').putImageData(res, 0, 0);
-  } else if (res && res.tagName === 'CANVAS') srcCanvas = res;
-  if (srcCanvas) {
-    srcCanvas.toBlob(b => { if (b) loadFile(new File([b], 'cutout.png', { type: 'image/png' })); }, 'image/png');
-  } else if (window.Blob && res instanceof Blob) {
-    loadFile(new File([res], 'cutout.png', { type: res.type || 'image/png' }));
-  } else {
-    setStatus('抠图结果格式无法识别');
-  }
-}
+/* ---------------- 抠图 ----------------
+   输入取引擎的全分辨率当前效果（不再用降采样预览，否则大图抠完尺寸缩水）；
+   结果经 applyCanvas 作为一步可撤销操作回灌（不再走打开文件、历史不清空）。 */
 function runGrabCut(rect) {
   if (!window.MTGrabCut || typeof window.MTGrabCut.cut !== 'function') { setStatus('抠图模块未就绪'); return; }
+  if (!editor || typeof editor.renderFullCanvas !== 'function') { setStatus('编辑引擎未就绪'); return; }
   exitSelectMode();
   $('#busyText').textContent = '正在抠图，大图会慢一点…';
   $('#busy').hidden = false;
   // 同步重活：先让忙碌态画出来，再开算
   setTimeout(() => {
+    const fail = msg => { $('#busy').hidden = true; setStatus('抠图失败：' + msg); };
     try {
-      const result = window.MTGrabCut.cut(currentImageData(), rect);
-      if (result && typeof result.then === 'function') {
-        result.then(r => { $('#busy').hidden = true; loadResultImage(r); setStatus('抠图完成'); })
-              .catch(err => { $('#busy').hidden = true; setStatus('抠图失败：' + err.message); });
-      } else {
+      const full = editor.renderFullCanvas();
+      if (!full) { fail('没有图片'); return; }
+      const fctx = full.getContext('2d');
+      const imgData = fctx.getImageData(0, 0, full.width, full.height);
+      const handle = r => {
+        if (!r || !r.width) { fail('结果格式无法识别'); return; }
+        const c = document.createElement('canvas');
+        c.width = r.width; c.height = r.height;
+        c.getContext('2d').putImageData(r, 0, 0);
         $('#busy').hidden = true;
-        loadResultImage(result);
-        setStatus('抠图完成');
+        call(() => editor.applyCanvas(c), '抠图失败').then(ok => { if (ok) afterOp('抠图完成'); });
+      };
+      const result = window.MTGrabCut.cut(imgData, rect);
+      if (result && typeof result.then === 'function') {
+        result.then(handle).catch(err => fail(err && err.message ? err.message : '未知错误'));
+      } else {
+        handle(result);
       }
     } catch (err) {
-      $('#busy').hidden = true;
-      setStatus('抠图失败：' + (err && err.message ? err.message : err));
+      fail(err && err.message ? err.message : '未知错误');
     }
   }, 60);
 }
@@ -359,7 +533,7 @@ const ADJUST = [
   { key: 'shadows',     label: '阴影',     min: -100, max: 100, step: 1 },
   { key: 'whites',      label: '白色',     min: -100, max: 100, step: 1 },
   { key: 'blacks',      label: '黑色',     min: -100, max: 100, step: 1 },
-  { key: 'clarity',     label: '清晰度',   min: 0,    max: 100, step: 1 },
+  { key: 'clarity',     label: '清晰度',   min: -100, max: 100, step: 1 },
   { key: 'sharpen',     label: '锐化',     min: 0,    max: 100, step: 1 }
 ];
 const sliderEls = {};
@@ -385,39 +559,39 @@ const sliderEls = {};
     input.addEventListener('input', () => {
       const v = parseFloat(input.value);
       val.textContent = a.step < 1 ? v.toFixed(2) : String(Math.round(v));
+      bumpChange();
       if (editor) { const p = {}; p[a.key] = v; try { editor.setAdjust(p); } catch (e) { /* 忽略 */ } }
     });
-    input.addEventListener('change', () => {
-      if (editor) call(() => editor.commitAdjust(), '应用失败').then(ok => {
-        if (ok) {
-          // 提交后引擎参数已归零，滑杆显示同步归零（与 Java 版松手归零一致）
-          for (const k in sliderEls) { sliderEls[k].input.value = 0; sliderEls[k].val.textContent = '0'; }
-          setStatus('调节已应用'); refresh();
-        }
-      });
-    });
-    lab.addEventListener('dblclick', () => resetOneSlider(a.key, true));
+    // 数值常驻不归零；松手时只记一个撤销检查点，Ctrl+Z 可逐步退回调节。
+    input.addEventListener('change', () => checkpoint());
+    lab.addEventListener('dblclick', () => resetOneSlider(a.key));
   }
 })();
-function resetOneSlider(key, commit) {
+function resetOneSlider(key) {
   const s = sliderEls[key];
   if (!s) return;
   s.input.value = 0; s.val.textContent = '0';
+  bumpChange();
   if (editor) {
     const p = {}; p[key] = 0;
     try { editor.setAdjust(p); } catch (e) { /* 忽略 */ }
-    if (commit) call(() => editor.commitAdjust(), '应用失败');
+    checkpoint();
+  }
+}
+/* 调节/曲线一段操作结束时记撤销检查点（引擎判断无变化则不记） */
+function checkpoint() {
+  if (editor && typeof editor.checkpointAdjust === 'function') {
+    try { editor.checkpointAdjust(); } catch (e) { /* 忽略 */ }
   }
 }
 $('#btnResetAdjust').addEventListener('click', async () => {
-  for (const a of ADJUST) { const s = sliderEls[a.key]; s.input.value = 0; s.val.textContent = '0'; }
   if (!editor) return;
-  if (typeof editor.resetAdjust === 'function') {
-    if (await call(() => editor.resetAdjust(), '重置失败')) { setStatus('已重置全部调节'); refresh(); }
-  } else {
-    const p = {}; for (const a of ADJUST) p[a.key] = 0;
-    try { editor.setAdjust(p); } catch (e) { /* 忽略 */ }
-    if (await call(() => editor.commitAdjust(), '重置失败')) { setStatus('已重置全部调节'); refresh(); }
+  if (await call(() => editor.resetAdjust(), '重置失败')) {
+    bumpChange();
+    syncUIFromEngine();
+    checkpoint(); // 重置本身也记一步，可撤销回来
+    setStatus('已重置全部调节');
+    refresh();
   }
 });
 
@@ -432,24 +606,35 @@ const curveState = {
   }
 };
 const curveCanvas = $('#curveCanvas');
+/* 曲线编辑器画线与引擎用同一条 Catmull-Rom 样条（与 engine.js 的 evalSpline 同算法），
+   保证画出来的线就是实际生效的线。 */
+function evalSplinePts(pts, x) {
+  const n = pts.length;
+  if (x <= pts[0][0]) return pts[0][1];
+  if (x >= pts[n - 1][0]) return pts[n - 1][1];
+  let i = 0;
+  while (i < n - 2 && x > pts[i + 1][0]) i++;
+  const p1 = pts[i], p2 = pts[i + 1];
+  const p0 = i > 0 ? pts[i - 1] : [2 * p1[0] - p2[0], 2 * p1[1] - p2[1]];
+  const p3 = i + 2 < n ? pts[i + 2] : [2 * p2[0] - p1[0], 2 * p2[1] - p1[1]];
+  const t = (x - p1[0]) / Math.max(1, p2[0] - p1[0]);
+  const t2 = t * t, t3 = t2 * t;
+  const y = 0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t
+    + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2
+    + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
+  return Math.max(0, Math.min(255, y));
+}
 function curveLUT(pts) {
-  const sorted = pts.slice().sort((a, b) => a[0] - b[0]);
+  const arr = pts.slice().sort((a, b) => a[0] - b[0]);
+  if (!arr.length || arr[0][0] > 0) arr.unshift([0, arr.length ? arr[0][1] : 0]);
+  if (arr[arr.length - 1][0] < 255) arr.push([255, arr[arr.length - 1][1]]);
   const lut = new Array(256);
-  for (let x = 0; x < 256; x++) {
-    if (x <= sorted[0][0]) { lut[x] = Math.round(sorted[0][1]); continue; }
-    if (x >= sorted[sorted.length - 1][0]) { lut[x] = Math.round(sorted[sorted.length - 1][1]); continue; }
-    for (let i = 1; i < sorted.length; i++) {
-      if (x <= sorted[i][0]) {
-        const [x0, y0] = sorted[i - 1], [x1, y1] = sorted[i];
-        lut[x] = Math.round(y0 + (y1 - y0) * (x - x0) / Math.max(1, x1 - x0));
-        break;
-      }
-    }
-  }
+  for (let x = 0; x < 256; x++) lut[x] = Math.round(evalSplinePts(arr, x));
   return lut;
 }
 function applyCurves() {
   if (!editor || typeof editor.setCurves !== 'function') return;
+  bumpChange();
   try {
     // 引擎 setCurves 接收控制点 [[x,y],...] 并自行按 Catmull-Rom 生成 LUT（与 Java 版一致）；
     // 本文件的 curveLUT 只供曲线编辑器画线显示用，不要传给引擎。
@@ -537,7 +722,7 @@ curveCanvas.addEventListener('pointermove', e => {
   pts[curveDrag] = [Math.max(0, Math.min(255, Math.round(x))), Math.max(0, Math.min(255, Math.round(y)))];
   drawCurve(); applyCurves();
 });
-curveCanvas.addEventListener('pointerup', () => { curveDrag = null; });
+curveCanvas.addEventListener('pointerup', () => { curveDrag = null; checkpoint(); });
 curveCanvas.addEventListener('dblclick', e => {
   const { px, py } = curveXY(e);
   const pts = curveState.points[curveState.channel];
@@ -548,10 +733,13 @@ curveCanvas.addEventListener('dblclick', e => {
     const d = Math.hypot(pad + qx / 255 * (W - 2 * pad) - px, pad + (255 - qy) / 255 * (H - 2 * pad) - py);
     if (d < bestD) { bestD = d; best = i; }
   });
-  if (best >= 0) { pts.splice(best, 1); curveSel = -1; drawCurve(); applyCurves(); }
+  if (best >= 0) { pts.splice(best, 1); curveSel = -1; drawCurve(); applyCurves(); checkpoint(); }
 });
-// 兜底删点：选中一个点后按 Delete/Backspace 删除（双击不灵时用这个）
+// Esc 退出选框/透视模式；Delete/Backspace 删除选中的曲线点（双击删点的兜底）
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && (mode === 'crop' || mode === 'cutout' || mode === 'persp')) {
+    exitSelectMode(); setStatus('已取消'); return;
+  }
   if (e.key !== 'Delete' && e.key !== 'Backspace') return;
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
@@ -559,13 +747,13 @@ document.addEventListener('keydown', e => {
   if (curveSel < 0 || curveSel >= pts.length || pts.length <= 2) return;
   pts.splice(curveSel, 1);
   curveSel = -1;
-  drawCurve(); applyCurves();
+  drawCurve(); applyCurves(); checkpoint();
   setStatus('已删除曲线点');
 });
 $('#curveChannel').addEventListener('change', e => { curveState.channel = e.target.value; curveSel = -1; drawCurve(); });
 $('#btnCurveReset').addEventListener('click', () => {
   curveState.points[curveState.channel] = [[0, 0], [255, 255]];
-  drawCurve(); applyCurves();
+  drawCurve(); applyCurves(); checkpoint();
   setStatus('曲线已重置');
 });
 
@@ -662,6 +850,7 @@ let textSeq = 0;
 const scratchCtx = document.createElement('canvas').getContext('2d');
 function textFont(t) { return (t.bold ? '700 ' : '400 ') + t.size + 'px sans-serif'; }
 function syncTexts() {
+  bumpChange();
   if (!editor || typeof editor.setTexts !== 'function') return;
   try {
     editor.setTexts(texts.map(t => ({ text: t.text, x: t.x, y: t.y, size: t.size, color: t.color, bold: t.bold })));
@@ -738,10 +927,15 @@ async function doExport(format, quality) {
   if (!editor) { setStatus('编辑引擎未就绪'); return; }
   if (!hasImg()) { setStatus('先打开一张图片'); return; }
   setStatus('正在导出…');
+  $('#busyText').textContent = '正在导出…';
+  $('#busy').hidden = false;
+  await new Promise(r => setTimeout(r, 60)); // 先让忙碌态画出来，大图导出是同步重活
   let blob = null;
   try { blob = await editor.exportBlob({ format: format, quality: quality }); }
-  catch (e) { setStatus('导出失败：' + (e && e.message ? e.message : e)); return; }
+  catch (e) { $('#busy').hidden = true; setStatus('导出失败：' + (e && e.message ? e.message : '未知错误')); return; }
+  $('#busy').hidden = true;
   if (!blob) { setStatus('导出失败：没有生成文件'); return; }
+  exportedCounter = changeCounter;
   const d = new Date();
   const pad = n => String(n).padStart(2, '0');
   const name = 'meowtu-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' +
@@ -807,6 +1001,9 @@ document.addEventListener('keydown', e => {
 })();
 
 /* ---------------- 初始化 ---------------- */
+$('#cfOk').addEventListener('click', () => settleConfirm(true));
+$('#cfCancel').addEventListener('click', () => settleConfirm(false));
+$('#btnPerspMode').addEventListener('click', () => enterPerspectiveMode());
 sizeOverlay();
 drawCurve();
 refresh();
