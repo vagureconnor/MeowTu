@@ -565,6 +565,9 @@ public class MainFrame extends JFrame {
         if (!editor.hasImage()) { setStatus("先打开一张图片"); return; }
         JPanel p = new JPanel(new GridLayout(4, 2, 6, 6));
         JComboBox<String> fmtBox = new JComboBox<>(Formats.SAVE_FORMATS);
+        String srcFmt = Formats.extension(new File(fileName)); // 默认跟随原图格式，避免 JPG 照片默认导成大 PNG
+        if ("jpeg".equals(srcFmt)) srcFmt = "jpg";
+        for (String s : Formats.SAVE_FORMATS) if (s.equals(srcFmt)) fmtBox.setSelectedItem(s);
         JSlider q = new JSlider(10, 100, 92);
         JSpinner scale = new JSpinner(new SpinnerNumberModel(100, 5, 400, 5));
         JLabel estLabel = new JLabel("预估体积：—");
@@ -582,7 +585,7 @@ public class MainFrame extends JFrame {
                     wp.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
                     wp.setCompressionQuality(q.getValue() / 100f);
                     BufferedImage rgb = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
-                    Graphics2D gg = rgb.createGraphics(); gg.drawImage(img, 0, 0, null); gg.dispose();
+                    Graphics2D gg = rgb.createGraphics(); gg.setColor(java.awt.Color.WHITE); gg.fillRect(0, 0, rgb.getWidth(), rgb.getHeight()); gg.drawImage(img, 0, 0, null); gg.dispose();
                     w.setOutput(ImageIO.createImageOutputStream(bos));
                     w.write(null, new javax.imageio.IIOImage(rgb, null, null), wp);
                     w.dispose();

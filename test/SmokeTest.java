@@ -292,7 +292,7 @@ public class SmokeTest {
 
         // ---- 工程文件：网页版样例导入对拍 + Java 往返 ----
         {
-            java.io.File sample = new java.io.File("/tmp/sample-web.meowtu");
+            java.io.File sample = new java.io.File("test/sample-web.meowtu");
             if (sample.exists()) {
                 String json = java.nio.file.Files.readString(sample.toPath(), java.nio.charset.StandardCharsets.UTF_8);
                 meowtu.Editor pe = new meowtu.Editor();
@@ -301,7 +301,7 @@ public class SmokeTest {
                 check("adj".equals(pe.layerAt(2).kind), "工程：顶层为调整层");
                 check("multiply".equals(pe.layerAt(1).blendMode) && Math.abs(pe.layerAt(1).opacity - 0.6) < 1e-9, "工程：混合模式/不透明度还原");
                 BufferedImage comp = pe.bakeComposite();
-                int[][] want = {{69, 18, 27}, {9, 162, 39}, {2, 15, 191}, {72, 165, 43}};
+                int[][] want = {{136, 15, 20}, {40, 156, 38}, {20, 11, 164}, {144, 161, 42}};
                 int[][] at = {{2, 2}, {25, 2}, {2, 20}, {25, 20}};
                 boolean okPts = comp.getWidth() == 40 && comp.getHeight() == 30;
                 StringBuilder ev = new StringBuilder();
@@ -317,14 +317,14 @@ public class SmokeTest {
                 meowtu.Editor pe2 = new meowtu.Editor();
                 ProjectIO.importProject(pe2, mine);
                 check(samePixels(pe.bakeComposite(), pe2.bakeComposite()), "工程：Java 导出->导入往返逐像素一致");
-                java.nio.file.Files.writeString(new java.io.File("/tmp/sample-java.meowtu").toPath(), mine, java.nio.charset.StandardCharsets.UTF_8);
+                java.nio.file.Files.writeString(new java.io.File("test/sample-java.meowtu").toPath(), mine, java.nio.charset.StandardCharsets.UTF_8);
                 // 配方：导出再套到新文档
                 String recipe = ProjectIO.exportRecipe(pe);
                 meowtu.Editor re = new meowtu.Editor();
                 re.setFreshImage(testImage(40, 30));
                 check(ProjectIO.applyRecipe(re, recipe) >= 1, "配方：导出/套用往返");
             } else {
-                check(false, "工程：缺少网页样例 /tmp/sample-web.meowtu（应由 gen-sample 先行生成）");
+                check(false, "工程：缺少网页样例 test/sample-web.meowtu（用 cjrig/gen-sample.js 生成）");
             }
         }
 

@@ -2570,6 +2570,13 @@
           sctx.drawImage(out, 0, 0, sc.width, sc.height);
           out = sc;
         }
+        if (type === 'image/jpeg') { // JPEG 不支持透明：垫白底，避免透明区域导出变黑
+          var bgc = makeCanvas(out.width, out.height);
+          var bx = bgc.getContext('2d');
+          bx.fillStyle = '#ffffff'; bx.fillRect(0, 0, bgc.width, bgc.height);
+          bx.drawImage(out, 0, 0);
+          out = bgc;
+        }
         return new Promise(function (resolve, reject) {
           out.toBlob(function (blob) {
             if (blob) resolve(blob);

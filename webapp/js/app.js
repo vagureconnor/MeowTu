@@ -168,6 +168,8 @@ async function loadFile(file) {
   if (/\.meowtu$/i.test(file.name || '')) { loadProjectFile(file); return; }
   if (file.type && !file.type.startsWith('image/')) { setStatus('这不是图片文件'); return; }
   if (isDirty() && !await confirmDiscard()) { setStatus('已取消打开'); return; }
+  sourceFormat = { 'image/jpeg': 'jpeg', 'image/webp': 'webp', 'image/png': 'png' }[file.type] || 'png';
+  sourceBytes = file.size || 0;
   setStatus('正在打开 ' + (file.name || '图片') + '…');
   const ok = await call(() => editor.loadFile(file), '打开失败');
   if (ok) {
@@ -177,6 +179,7 @@ async function loadFile(file) {
     exportedCounter = changeCounter;
     syncUIFromEngine();
     refresh();
+    applyExportDefault();
   }
 }
 /* 打开 .meowtu 工程：解析 JSON → 引擎校验恢复（一步可撤销）；
@@ -189,12 +192,14 @@ async function loadProjectFile(file) {
   catch (e) { setStatus('打开工程失败：文件已损坏，不是有效的工程文件'); return; }
   const ok = await call(() => editor.importProject(proj), '打开工程失败');
   if (ok) {
+    sourceFormat = null; sourceBytes = 0;
     setStatus('已打开工程 ' + (file.name || ''));
     exitSelectMode();
     snapshotFromCanvas();
     exportedCounter = changeCounter;
     syncUIFromEngine();
     refresh();
+    applyExportDefault();
   }
 }
 async function loadSample() {
@@ -203,12 +208,14 @@ async function loadSample() {
   setStatus('正在生成示例图…');
   const ok = await call(() => editor.newSample(), '示例图生成失败');
   if (ok) {
+    sourceFormat = null; sourceBytes = 0;
     setStatus('示例图已生成，可以开始试用各功能');
     exitSelectMode();
     snapshotFromCanvas();
     exportedCounter = changeCounter;
     syncUIFromEngine();
     refresh();
+    applyExportDefault();
   }
 }
 
@@ -950,7 +957,7 @@ function runGrabCut(rect) {
         c.width = r.width; c.height = r.height;
         c.getContext('2d').putImageData(r, 0, 0);
         $('#busy').hidden = true;
-        call(() => editor.applyCanvas(c), '抠图失败').then(ok => { if (ok) afterOp('抠图完成'); });
+        call(() => editor.applyCanvas(c), '抠图失败').then(ok => { if (ok) { afterOp('抠图完成'); applyExportDefault(); } });
       };
       const result = window.MTGrabCut.cut(imgData, rect);
       if (result && typeof result.then === 'function') {
@@ -2444,17 +2451,52 @@ $('#btnCommitTexts').addEventListener('click', async () => {
 
 /* ---------------- 导出 / 保存 ---------------- */
 const lastExport = { format: 'png', quality: 0.92 };
+let sourceFormat = null, sourceBytes = 0; // 当前图片的来源格式/体积：默认导出跟随它，避免 JPG 照片被默认存成巨大的 PNG
 function fmtExt(f) { return f === 'jpeg' ? 'jpg' : f; }
+function fmtBytes(n) { return n >= 1048576 ? (n / 1048576).toFixed(2) + ' MB' : (n / 1024).toFixed(1) + ' KB'; }
 function syncQualityRow() {
   $('#qualityRow').style.display = $('#selFormat').value === 'png' ? 'none' : 'flex';
 }
 $('#selFormat').addEventListener('change', () => {
-  lastExport.format = $('#selFormat').value; syncQualityRow();
+  lastExport.format = $('#selFormat').value; syncQualityRow(); scheduleQuickEstimate();
 });
 $('#inQuality').addEventListener('input', () => {
   $('#qualityVal').textContent = $('#inQuality').value;
   lastExport.quality = parseInt($('#inQuality').value, 10) / 100;
+  scheduleQuickEstimate();
 });
+/* 画布（预览合成）里有没有透明像素：缩小采样扫 alpha，够判定默认格式用 */
+function hasTransparency() {
+  try {
+    const t = document.createElement('canvas'); t.width = 48; t.height = 48;
+    const x = t.getContext('2d'); x.drawImage(editorCanvas, 0, 0, 48, 48);
+    const d = x.getImageData(0, 0, 48, 48).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i] < 250) return true;
+  } catch (e) { /* 忽略 */ }
+  return false;
+}
+/* 载入新图后定默认导出格式：有透明 → PNG 保真；否则跟随原图格式；样片/工程默认 JPEG */
+function applyExportDefault() {
+  let f = sourceFormat || 'jpeg';
+  if (hasTransparency()) f = 'png';
+  lastExport.format = f;
+  $('#selFormat').value = f;
+  syncQualityRow();
+  scheduleQuickEstimate();
+}
+/* 导出栏旁的体积预估：按当前格式/质量真实编码一次，并与原图体积对照 */
+let qeTimer = null;
+function scheduleQuickEstimate() { clearTimeout(qeTimer); qeTimer = setTimeout(quickEstimate, 500); }
+async function quickEstimate() {
+  const el = $('#quickEst');
+  if (!el) return;
+  if (!editor || !hasImg()) { el.textContent = ''; return; }
+  try {
+    const blob = await editor.exportBlob({ format: lastExport.format, quality: lastExport.quality });
+    el.textContent = '约 ' + fmtBytes(blob.size) + (sourceBytes ? '（原图 ' + fmtBytes(sourceBytes) + '）' : '');
+  } catch (e) { el.textContent = ''; }
+}
+try { editor.on('state', scheduleQuickEstimate); } catch (e) { /* 忽略 */ }
 syncQualityRow();
 
 async function doExport(format, quality, opts) {
@@ -2782,6 +2824,7 @@ async function loadSampleArt(id, skipConfirm) {
   if (!c) return false;
   const ok = await call(() => editor.loadCanvas(c), '样片载入失败');
   if (ok) {
+    sourceFormat = null; sourceBytes = 0;
     const meta = window.MTSamples.list.find(s => s.id === id);
     setStatus('已载入展示样片：' + (meta ? meta.name : id));
     exitSelectMode();
@@ -2789,6 +2832,7 @@ async function loadSampleArt(id, skipConfirm) {
     exportedCounter = changeCounter;
     syncUIFromEngine();
     refresh();
+    applyExportDefault();
   }
   return ok;
 }
